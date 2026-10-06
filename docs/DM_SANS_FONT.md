@@ -2,6 +2,8 @@
 
 Guardian can use **DM Sans** (Regular) for on-screen text so it matches the Figma design.
 
+DM Sans is Copyright 2014 The DM Sans Project Authors and is under the SIL Open Font License 1.1. The license is [fonts/OFL.txt](../fonts/OFL.txt). Keep that file with the font and with `src/media/DMSans_subset.h` whenever you redistribute them. The font is not sold on its own, and this subset stays under the same license.
+
 ## How to add DM Sans
 
 1. **Python and fonttools**

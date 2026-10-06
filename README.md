@@ -1,3 +1,13 @@
+# Guardian
+
+Firmware for the Guardian miner (LilyGo T-Display S3).
+
+This repository is a modified [NerdMiner v2](https://github.com/BitMaker-hub/NerdMiner_v2), release V1.8.3. The original code remains under the MIT License: Copyright (c) 2023 Bitmaker. Earlier work: HAN Miner, Copyright (c) 2022 Valerio Vaccaro. The license text is in [LICENSE](LICENSE) and is unchanged.
+
+Build the Guardian firmware with `pio run -e guardian`. Guardian screen graphics are original. On-screen text uses DM Sans (Copyright 2014 The DM Sans Project Authors, SIL Open Font License 1.1, [fonts/OFL.txt](fonts/OFL.txt)) and Digital Numbers (Copyright (c) 2015 Stephan Ahlf, SIL Open Font License 1.1, [src/media/DigitalNumbers-OFL.txt](src/media/DigitalNumbers-OFL.txt)). Those fonts are embedded in the firmware and are not sold on their own.
+
+The rest of this file is the upstream NerdMiner README.
+
 # NerdSoloMiner
 
 **The NerdSoloMiner v2**

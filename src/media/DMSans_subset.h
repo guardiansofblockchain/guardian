@@ -1,4 +1,7 @@
-// DM Sans Regular for Guardian. Source: tools/fonts/DMSans-Regular.ttf
+// DM Sans Regular subset for Guardian. Source: tools/fonts/DMSans-Regular.ttf
+// Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+// Licensed under the SIL Open Font License, Version 1.1. See fonts/OFL.txt.
+// This subset stays under that license. It is not sold on its own.
 
 #ifndef DM_SANS_SUBSET_H
 #define DM_SANS_SUBSET_H

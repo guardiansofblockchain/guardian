@@ -1279,8 +1279,9 @@ const unsigned char NotoSans_Bold[] PROGMEM  = {
 };
 
 // Digital Numbers is a fixed width (web)font in a cool liquid-crystal display (LCD) style.
+// Copyright (c) 2015 Stephan Ahlf (https://github.com/s-a/digital-numbers-font)
+// Licensed under the SIL Open Font License, Version 1.1. See src/media/DigitalNumbers-OFL.txt.
 // https://github.com/s-a/digital-numbers-font/blob/gh-pages/dist/DigitalNumbers-Regular.ttf
-// License: https://github.com/s-a/digital-numbers-font/blob/gh-pages/OFL.txt
 // Supported glyphs: 0123456789 ,.:;KMGTPE
 
 // array size is 4184
