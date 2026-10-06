@@ -1,59 +1,54 @@
-# Guardian – obrázky pro displej
+# Guardian display images
 
-Při sestavení s **GUARDIAN=1** se používají jen tyto bitmapy. Ostatní logika zůstává beze změny.
+A **GUARDIAN=1** build uses these bitmaps. The rest of the firmware logic stays the same.
 
-## Soubory a význam
+## Files
 
-| Soubor | Kde se zobrazí |
-|--------|----------------|
-| **guardian_setup.png** | Setup obrazovka – WiFi konfigurace (jméno sítě Guardian, heslo GOB, WAITING CONFIG). Zobrazuje se, dokud někdo nenastaví WiFi. |
-| **guardian_init.png** | Init obrazovka – zobrazí se krátce při startu zařízení (boot). |
-| **tools/figma/miner_bg_320.png** | Pozadí mining obrazovky (Figma 752:609). Živá čísla kreslí firmware. |
-| **tools/figma/clock_bg_320.png** | Hodiny (Figma 752:976). Čas, cena, hashrate a výška bloku kreslí firmware. |
-| **tools/figma/price_bg_320.png** | Cena BTC (Figma 752:787). Částka, hashrate a výška bloku kreslí firmware. |
-| **tools/figma/global_bg_320.png** | Global stats (Figma 752:1239). Obtížnost, fee, blok, zbytek do halvingu a hashrate kreslí firmware. |
+| File | Where it shows |
+|------|----------------|
+| **guardian_setup.png** | Setup screen: Wi-Fi configuration (SSID Guardian, password GOB, WAITING CONFIG). Stays up until Wi-Fi is configured. |
+| **guardian_init.png** | Init screen: shown briefly at boot. |
+| **tools/figma/miner_bg_320.png** | Mining screen background (Figma 752:609). The firmware draws the live numbers. |
+| **tools/figma/clock_bg_320.png** | Clock (Figma 752:976). The firmware draws time, price, hashrate, and block height. |
+| **tools/figma/price_bg_320.png** | BTC price (Figma 752:787). The firmware draws the amount, hashrate, and block height. |
+| **tools/figma/global_bg_320.png** | Global stats (Figma 752:1239). The firmware draws difficulty, fee, block, blocks to the halving, and hashrate. |
 
-Oba obrázky musí být **320 × 170 pixelů**.
+Each image must be **320 x 170** pixels.
 
----
+## Commands (from the project root)
 
-## Příkazy (od kořene projektu)
+**1. Convert images to a header**
 
-**1. Převod obrázků do hlavičky**  
-Oba PNG dej do kořene projektu (vedle `platformio.ini`), pak:
+Put both PNGs in the project root (next to `platformio.ini`), then:
 
 ```bash
-# pokud ještě nemáš aktivované venv a Pillow:
+# if the venv and Pillow are not set up yet:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install Pillow
 
-# převod (1. = setup, 2. = init):
+# convert (1st = setup, 2nd = init):
 python3 tools/png_to_guardian_header.py guardian_setup.png guardian_init.png
 ```
 
-**2. Build a nahrání na zařízení**
+**2. Build and flash**
 
 ```bash
 pio run -e guardian -t upload
 ```
 
----
+## Reverse export: .h to PNG
 
-## Zpětný export .h → PNG (reverse)
-
-Z aktuálního `images_guardian_320_170.h` můžeš zpětně vyrobit PNG (např. pro úpravy v editoru):
+From the current `images_guardian_320_170.h` you can write PNGs back out (for example to edit them):
 
 ```bash
 python3 tools/header_to_png.py
 ```
 
-V kořeni projektu se vytvoří `guardian_setup_from_h.png` a `guardian_init_from_h.png`. Ze souboru `images_320_170.h` (NerdMiner) zkusíš stejný skript s cestou k souboru a `--out-dir` (viz `python3 tools/header_to_png.py --help` / docstring ve skriptu).
+That creates `guardian_setup_from_h.png` and `guardian_init_from_h.png` in the project root. For `images_320_170.h` (stock NerdMiner) pass the header path and `--out-dir` (`python3 tools/header_to_png.py --help`, or the docstring in the script).
 
----
+## Summary
 
-## Shrnutí
-
-- **guardian_setup.png** (1. argument) → obrazovka s WiFi jménem a heslem (setup).
-- **guardian_init.png** (2. argument) → obrazovka při startu (init).
-- Při čekání na konfiguraci (Guardian) monitor nepřepisuje setup obrazovku mining UI.
+- **guardian_setup.png** (1st argument): screen with the Wi-Fi name and password (setup).
+- **guardian_init.png** (2nd argument): screen at boot (init).
+- While Guardian is waiting for configuration, the monitor does not overwrite the setup screen with the mining UI.

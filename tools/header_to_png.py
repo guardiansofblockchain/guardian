@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Zpětný export z .h (RGB565) do PNG. Bere jen prvních 320×170 = 54400 pixelů.
+Export an RGB565 .h array back to PNG. Uses the first 320x170 = 54400 pixels.
 
-Použití:
-  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir export_nerd
-  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir export_nerd --swap
-  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir export_nerd --both
-     → name.png (bez swap) a name_swap.png (se swap)
+Usage:
+  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir out
+  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir out --swap
+  python3 tools/header_to_png.py src/media/images_320_170.h --out-dir out --both
+     -> name.png (no swap) and name_swap.png (with swap)
   python3 tools/header_to_png.py ... --bgr
-     → interpretovat jako BGR565 (prohozené R a B)
+     -> interpret the pixels as BGR565 (R and B swapped)
 """
 from __future__ import print_function
 import re
@@ -18,7 +18,7 @@ import os
 try:
     from PIL import Image
 except ImportError:
-    print("Potřebuješ Pillow: pip install Pillow", file=sys.stderr)
+    print("Pillow is required: pip install Pillow", file=sys.stderr)
     sys.exit(1)
 
 WIDTH = 320
@@ -27,7 +27,7 @@ PIXELS = 320 * 170
 
 
 def rgb565_to_rgb(pixel, bgr565=False):
-    """RGB565 (uint16) -> (r, g, b) 0-255. bgr565=True pro BGR pořadí (některé konvertory)."""
+    """RGB565 (uint16) -> (r, g, b) 0-255. bgr565=True uses BGR order (some converters)."""
     if bgr565:
         b5 = (pixel >> 11) & 0x1F
         g6 = (pixel >> 5) & 0x3F
@@ -47,13 +47,13 @@ def extract_array(content, name):
     m = re.search(pattern, content, re.DOTALL)
     if not m:
         return None
-    # Ber jen hodnoty za čárkou (data), ne hex z komentáře "// 0x0010 (16)" – ty dělaly svislé čáry
+    # Keep values followed by a comma (pixel data). Hex in comments like "// 0x0010 (16)" drew vertical lines.
     hex_values = re.findall(r"(0x[0-9A-Fa-f]{4})\s*,", m.group(1))
     return [int(h, 16) for h in hex_values]
 
 
 def array_to_png(arr, out_path, swap_bytes=False, bgr565=False, stride_340=False):
-    """stride_340: pro pole 0xFC58 (64600) – data jsou 340 pixelů na řádek, kreslíme 320×170."""
+    """stride_340: arrays of 0xFC58 (64600) store 340 pixels per row. We draw 320x170."""
     pixels_rgb = []
     if stride_340 and len(arr) >= 340 * 170:
         for row in range(HEIGHT):
@@ -100,7 +100,7 @@ def main():
         bgr565 = True
 
     if not os.path.isfile(h_path):
-        print("Soubor neexistuje:", h_path, file=sys.stderr)
+        print("File not found:", h_path, file=sys.stderr)
         sys.exit(1)
 
     with open(h_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -124,21 +124,21 @@ def main():
         arr = extract_array(content, name)
         if not arr:
             continue
-        # Pole s 64600 prvky (0xFC58) jsou uložena 340 px/řádek
+        # Arrays of 64600 values (0xFC58) are stored at 340 px per row
         use_stride340 = len(arr) >= 340 * 170
         if both:
             array_to_png(arr, os.path.join(out_dir, base + ".png"), swap_bytes=False, bgr565=bgr565, stride_340=use_stride340)
             array_to_png(arr, os.path.join(out_dir, base + "_swap.png"), swap_bytes=True, bgr565=bgr565, stride_340=use_stride340)
-            print("Zapsáno: {}.png a {}_swap.png{}".format(base, base, " (stride 340)" if use_stride340 else ""))
+            print("Wrote: {}.png and {}_swap.png{}".format(base, base, " (stride 340)" if use_stride340 else ""))
             written += 2
         else:
             path = os.path.join(out_dir, base + ".png")
             array_to_png(arr, path, swap_bytes=swap_bytes, bgr565=bgr565, stride_340=use_stride340)
-            print("Zapsáno: {}{}".format(path, " (stride 340)" if use_stride340 else ""))
+            print("Wrote: {}{}".format(path, " (stride 340)" if use_stride340 else ""))
             written += 1
 
     if written == 0:
-        print("Žádné pole nenalezeno.", file=sys.stderr)
+        print("No array found.", file=sys.stderr)
         sys.exit(1)
 
 

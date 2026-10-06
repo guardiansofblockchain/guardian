@@ -1,24 +1,24 @@
-# Guardian – vytížení chipu a těžba
+# Guardian: chip load and mining
 
-## Co je nastaveno pro vyšší vytížení
+## What is set for a higher load
 
-Při sestavení s **GUARDIAN** (env `guardian`) platí:
+A **GUARDIAN** build (env `guardian`) does two things:
 
-1. **CPU 240 MHz**  
-   V `setup()` se pro ESP32-S3 volá `setCpuFrequencyMhz(240)` – maximální frekvence pro tento chip. Po startu uvidíš v sériovém výstupu řádek `CPU: 240 MHz`.  
-   *Kde:* `src/NerdMinerV2.ino.cpp` (podmínka `CONFIG_IDF_TARGET_ESP32S3` a `NERDMINERV2`).
+1. **CPU 240 MHz**
+   In `setup()`, ESP32-S3 calls `setCpuFrequencyMhz(240)`, the maximum for this chip. After boot the serial log prints `CPU: 240 MHz`.
+   *Where:* `src/NerdMinerV2.ino.cpp` (when `CONFIG_IDF_TARGET_ESP32S3` and `NERDMINERV2` are set).
 
-2. **Větší mining batch (Guardian), cca +20 %**  
-   V `src/mining.cpp` jsou pro `GUARDIAN` nastaveny mírně větší joby (~+20 % oproti výchozím):
-   - **NONCE_PER_JOB_SW** ≈ 4915 (výchozí 4096)
-   - **NONCE_PER_JOB_HW** ≈ 19660 (výchozí 16×1024)  
+2. **Larger mining batch (Guardian), about +20%**
+   In `src/mining.cpp`, `GUARDIAN` uses slightly larger jobs (about +20% over the defaults):
+   - **NONCE_PER_JOB_SW** about 4915 (default 4096)
+   - **NONCE_PER_JOB_HW** about 19660 (default 16*1024)
 
-   Každý mining task dělá o trochu víc práce v jednom kuse, méně času se tráví přepínáním a frontou – chip zůstane víc vytížený, hashrate i teplota mohou mírně stoupnout.
+   Each mining task does a bit more work in one piece, so less time is spent switching and queueing. The chip stays busier, and hashrate and temperature can rise a little.
 
-## Další možnosti (ruční úpravy)
+## Further manual changes
 
-- **Frekvence:** Na ESP32-S3 je 240 MHz maximum; nižší hodnoty (160, 80 MHz) by snížily spotřebu a teplotu.
-- **Batch:** Pro větší vytížení můžeš u `#ifdef GUARDIAN` v `src/mining.cpp` dál zvedat konstanty (např. 8192 / 32*1024 nebo víc). Příliš velké joby můžou zvyšovat latenci odevzdávání shareů.
-- **Platformio:** V `platformio.ini` má env `guardian` už `board_build.f_cpu = 240000000L` – build je cílen na 240 MHz; volání `setCpuFrequencyMhz(240)` v kódu to jen ověří/zajistí za běhu.
+- **Frequency:** 240 MHz is the ESP32-S3 maximum. Lower values (160, 80 MHz) reduce power and temperature.
+- **Batch:** For a higher load, raise the constants under `#ifdef GUARDIAN` in `src/mining.cpp` (for example 8192 / 32*1024 or more). Jobs that are too large can add latency before a share is submitted.
+- **PlatformIO:** The `guardian` env already sets `board_build.f_cpu = 240000000L`, so the build targets 240 MHz. The `setCpuFrequencyMhz(240)` call only confirms that at runtime.
 
-Teplota kolem 35 °C při 250 KH/s je u ESP32-S3 s 240 MHz v pohodě; po těchto úpravách může hashrate i teplota mírně stoupnout.
+Around 35 C at 250 KH/s is fine for an ESP32-S3 at 240 MHz. After these changes, hashrate and temperature can rise a little.

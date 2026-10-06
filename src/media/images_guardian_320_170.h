@@ -1,5 +1,5 @@
 // Guardian display images (320x170)
-// Vygenerováno z:
+// Generated from:
 //   setup (WiFi config): guardian_setup.png
 //   init (boot):         guardian_init.png
 

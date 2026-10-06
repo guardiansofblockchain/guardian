@@ -1,39 +1,39 @@
-# Font DM Sans v Guardianu
+# DM Sans in Guardian
 
-Guardian může používat **DM Sans** (Regular) pro text na obrazovkách, aby odpovídal designu z Figmy.
+Guardian can use **DM Sans** (Regular) for on-screen text so it matches the Figma design.
 
-## Jak přidat DM Sans do projektu
+## How to add DM Sans
 
-1. **Python a fonttools**
+1. **Python and fonttools**
    ```bash
    pip install fonttools
    ```
 
-2. **Stažení fontu**  
-   Stáhni [DM Sans na Google Fonts](https://fonts.google.com/specimen/DM+Sans) (Download family), rozbal ZIP a zkopíruj **DMSans-Regular.ttf** do složky:
+2. **Download the font**
+   Download [DM Sans on Google Fonts](https://fonts.google.com/specimen/DM+Sans) (Download family), unzip it, and copy **DMSans-Regular.ttf** to:
    ```
    tools/fonts/DMSans-Regular.ttf
    ```
-   (Skript může zkusit stáhnout font sám; pokud to selže, použij ruční stažení.)
+   The script can try to download the font itself. If that fails, download it by hand.
 
-3. **Generování C hlavičky**
-   Z kořene projektu:
+3. **Generate the C header**
+   From the project root:
    ```bash
    python3 tools/prepare_dmsans_font.py
    ```
-   Tím se vytvoří **src/media/DMSans_subset.h** (pole `DMSans_Regular_subset` v PROGMEM). Skript udělá subset fontu (ASCII + Latin-1), aby byl soubor menší.
+   This writes **src/media/DMSans_subset.h** (the `DMSans_Regular_subset` array in PROGMEM). The script subsets the font (ASCII + Latin-1) so the file stays smaller.
 
-4. **Zapnutí DM Sans ve firmware**  
-   Po vygenerování `src/media/DMSans_subset.h` se při sestavení s `GUARDIAN` automaticky načte DM Sans (včetně popisků na mining obrazovce). Znovu sestav a nahraj:
+4. **Enable DM Sans in the firmware**
+   After `src/media/DMSans_subset.h` exists, a `GUARDIAN` build loads DM Sans automatically, including the mining-screen labels. Build and flash again:
    ```bash
    pio run -e guardian -t upload
    ```
-   Pokud hlavička neexistuje, firmware použije výchozí font (DigitalNumbers pro čísla, FreeSans pro popisky).
+   If the header is missing, the firmware falls back to the default fonts (DigitalNumbers for figures, FreeSans for labels).
 
-## Rozsah znaků
+## Character coverage
 
-Subset obsahuje ASCII (U+0020–007F) a Latin-1 (U+00A0–00FF), tedy číslice, písmena, mezery a běžnou interpunkci včetně háčků a čárek. To stačí pro hashrate, block templates, čas, teplotu a popisky na mining obrazovce.
+The subset contains ASCII (U+0020-007F) and Latin-1 (U+00A0-00FF): digits, letters, spaces, and common punctuation, including Latin-1 accents. That covers hashrate, block templates, time, temperature, and the mining-screen labels.
 
-## Velikost
+## Size
 
-Subset fontu má typicky řádově desítky až nízké stovky KB. Celý TTF bez subsetu je větší; pokud nechceš instalovat fonttools, skript použije celý soubor (varování v konzoli).
+The subset is typically tens to a few hundred KB. A full TTF without a subset is larger. If fonttools is not installed, the script embeds the whole file and prints a warning.
