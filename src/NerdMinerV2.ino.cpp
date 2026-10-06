@@ -21,6 +21,9 @@
 #endif
 
 #include <soc/soc_caps.h>
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(NERDMINERV2)
+#include <esp32-hal-cpu.h>
+#endif
 //#define HW_SHA256_TEST
 
 //3 seconds WDT
@@ -73,6 +76,11 @@ void setup()
 
   Serial.setTimeout(0);
   delay(SECOND_MS/10);
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(NERDMINERV2)
+  setCpuFrequencyMhz(240);
+  Serial.printf("CPU: %u MHz\n", getCpuFrequencyMhz());
+#endif
 
   esp_task_wdt_init(WDT_MINER_TIMEOUT, true);
   // Idle task that would reset WDT never runs, because core 0 gets fully utilized
@@ -183,7 +191,12 @@ void setup()
   esp_task_wdt_add(minerTask2);
 #endif
 
+#ifdef GUARDIAN
+  // Stay above the monitor task so a screen redraw cannot swallow a click.
+  vTaskPrioritySet(NULL, 6);
+#else
   vTaskPrioritySet(NULL, 4);
+#endif
 
   /******** MONITOR SETUP *****/
   setup_monitor();
@@ -215,5 +228,9 @@ void loop() {
 #endif
   wifiManagerProcess(); // avoid delays() in loop when non-blocking and other long running code
 
+#ifdef GUARDIAN
+  vTaskDelay(10 / portTICK_PERIOD_MS);
+#else
   vTaskDelay(50 / portTICK_PERIOD_MS);
+#endif
 }

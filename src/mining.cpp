@@ -19,9 +19,16 @@
 #include "mbedtls/sha256.h"
 #include "i2c_master.h"
 
+double currentPoolDifficulty = DEFAULT_DIFFICULTY;
+
 //10 Jobs per second
+#ifdef GUARDIAN
+#define NONCE_PER_JOB_SW  (4096 + (4096*20)/100)   // +20% ~4915
+#define NONCE_PER_JOB_HW  ((16*1024) + ((16*1024)*20)/100)  // +20% ~19661
+#else
 #define NONCE_PER_JOB_SW 4096
 #define NONCE_PER_JOB_HW 16*1024
+#endif
 
 //#define I2C_SLAVE
 
@@ -245,8 +252,8 @@ void runStratumWorker(void *name) {
   }
 #endif
 
-  // connect to pool  
-  double currentPoolDifficulty = DEFAULT_DIFFICULTY;
+  // connect to pool
+  currentPoolDifficulty = DEFAULT_DIFFICULTY;
   uint32_t nonce_pool = 0;
   uint32_t job_pool = 0xFFFFFFFF;
   uint32_t last_job_time = millis();
@@ -1207,6 +1214,9 @@ void runMonitor(void *name)
 
   Serial.println("[MONITOR] started");
   restoreStat();
+#ifdef GUARDIAN
+  monitorStartNetworkTask();
+#endif
 
   unsigned long mLastCheck = 0;
 
@@ -1220,6 +1230,9 @@ void runMonitor(void *name)
   uint32_t last_update_millis = millis();
   uint32_t uptime_frac = 0;
 
+  static int shownScreen = -1;
+  static unsigned long lastDrawElapsed = 1000;
+
   while (1)
   {
     uint32_t now_millis = millis();
@@ -1227,45 +1240,60 @@ void runMonitor(void *name)
       now_millis = last_update_millis;
     
     uint32_t mElapsed = now_millis - mLastCheck;
-    if (mElapsed >= 1000)
+    int screenNow = currentDisplayDriver->current_cyclic_screen;
+    bool screenChanged = screenNow != shownScreen;
+    if (mElapsed >= 1000 || screenChanged)
     { 
-      mLastCheck = now_millis;
-      last_update_millis = now_millis;
-      unsigned long currentKHashes = (Mhashes * 1000) + hashes / 1000;
-      elapsedKHs = currentKHashes - totalKHashes;
-      totalKHashes = currentKHashes;
-
-      uptime_frac += mElapsed;
-      while (uptime_frac >= 1000)
+      unsigned long drawElapsed = lastDrawElapsed;
+      if (mElapsed >= 1000)
       {
-        uptime_frac -= 1000;
-        upTime ++;
+        mLastCheck = now_millis;
+        last_update_millis = now_millis;
+        unsigned long currentKHashes = (Mhashes * 1000) + hashes / 1000;
+        elapsedKHs = currentKHashes - totalKHashes;
+        totalKHashes = currentKHashes;
+
+        uptime_frac += mElapsed;
+        while (uptime_frac >= 1000)
+        {
+          uptime_frac -= 1000;
+          upTime ++;
+        }
+        drawElapsed = mElapsed;
+        lastDrawElapsed = mElapsed;
+
+        if (elapsedKHs == 0)
+        {
+          Serial.printf(">>> [i] Miner: newJob>%s / inRun>%s) - Client: connected>%s / subscribed>%s / wificonnected>%s\n",
+              "true",
+              isMinerSuscribed ? "true" : "false",
+              client.connected() ? "true" : "false", isMinerSuscribed ? "true" : "false", WiFi.status() == WL_CONNECTED ? "true" : "false");
+        }
+
+#ifdef DEBUG_MEMORY
+        Serial.printf("### [Total Heap / Free heap / Min free heap]: %d / %d / %d \n", ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMinFreeHeap());
+        Serial.printf("### Max stack usage: %d\n", uxTaskGetStackHighWaterMark(NULL));
+#endif
+
+        seconds_elapsed++;
+        if(seconds_elapsed % (saveIntervals[currentIntervalIndex]) == 0){
+          saveStat();
+          seconds_elapsed = 0;
+          if(currentIntervalIndex < saveIntervalsSize - 1)
+            currentIntervalIndex++;
+        }
       }
 
-      drawCurrentScreen(mElapsed);
-
-      // Monitor state when hashrate is 0.0
-      if (elapsedKHs == 0)
-      {
-        Serial.printf(">>> [i] Miner: newJob>%s / inRun>%s) - Client: connected>%s / subscribed>%s / wificonnected>%s\n",
-            "true",//(1) ? "true" : "false",
-            isMinerSuscribed ? "true" : "false",
-            client.connected() ? "true" : "false", isMinerSuscribed ? "true" : "false", WiFi.status() == WL_CONNECTED ? "true" : "false");
-      }
-
-      #ifdef DEBUG_MEMORY
-      Serial.printf("### [Total Heap / Free heap / Min free heap]: %d / %d / %d \n", ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMinFreeHeap());
-      Serial.printf("### Max stack usage: %d\n", uxTaskGetStackHighWaterMark(NULL));
-      #endif
-
-      seconds_elapsed++;
-
-      if(seconds_elapsed % (saveIntervals[currentIntervalIndex]) == 0){
-        saveStat();
-        seconds_elapsed = 0;
-        if(currentIntervalIndex < saveIntervalsSize - 1)
-          currentIntervalIndex++;
-      }    
+#ifdef GUARDIAN
+      monitorFreezeHashrate(mElapsed < 1000);
+#endif
+      monitorSetCacheOnly(true);
+      drawCurrentScreen(drawElapsed);
+      monitorSetCacheOnly(false);
+#ifdef GUARDIAN
+      monitorFreezeHashrate(false);
+#endif
+      shownScreen = screenNow;
     }
     animateCurrentScreen(frame);
     doLedStuff(frame);

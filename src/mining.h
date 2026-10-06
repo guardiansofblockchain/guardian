@@ -16,6 +16,9 @@
 
 #define TARGET_BUFFER_SIZE 64
 
+// Pool target from mining.set_difficulty. Read by the Guardian miner screen.
+extern double currentPoolDifficulty;
+
 void runMonitor(void *name);
 
 void runStratumWorker(void *name);

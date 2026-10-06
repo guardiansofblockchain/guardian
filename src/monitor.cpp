@@ -32,7 +32,64 @@ bool invertColors = false;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 3600, 60000);
 unsigned int bitcoin_price=0;
+static bool s_cacheOnly = false;
+static bool s_freezeHashrate = false;
+
+void monitorSetCacheOnly(bool on)
+{
+  s_cacheOnly = on;
+}
+
+void monitorFreezeHashrate(bool on)
+{
+  s_freezeHashrate = on;
+}
+
+static unsigned long mFeeUpdate = 0;
+
+#ifdef GUARDIAN
+void updateGlobalData(void);
+String getBlockHeight(void);
+bool guardianFetchNetwork(void);
+void getTime(unsigned long *currentHours, unsigned long *currentMinutes, unsigned long *currentSeconds);
+
+static void guardianNetTask(void *)
+{
+  vTaskDelay(1200 / portTICK_PERIOD_MS);
+  int spins = 0;
+  for (;;)
+  {
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      if (!guardianFetchNetwork())
+      {
+        getBTCprice();
+        getBlockHeight();
+        updateGlobalData();
+      }
+      else if (mFeeUpdate == 0)
+        updateGlobalData();
+      unsigned long hours, minutes, seconds;
+      getTime(&hours, &minutes, &seconds);
+    }
+    spins++;
+    uint32_t waitMs = (spins < 8) ? 5000 : 20000;
+    vTaskDelay(waitMs / portTICK_PERIOD_MS);
+  }
+}
+#endif
+
+void monitorStartNetworkTask(void)
+{
+#ifdef GUARDIAN
+  xTaskCreatePinnedToCore(guardianNetTask, "gNet", 16384, NULL, 4, NULL, 0);
+#endif
+}
+#ifdef GUARDIAN
+String current_block = "";
+#else
 String current_block = "793261";
+#endif
 global_data gData;
 pool_data pData;
 String poolAPIUrl;
@@ -48,6 +105,9 @@ void setup_monitor(void){
     timeClient.setTimeOffset(3600 * Settings.Timezone);
 
     Serial.println("TimeClient setup done");
+#ifdef GUARDIAN
+    gData.halfHourFee = -1;
+#endif
 #ifdef SCREEN_WORKERS_ENABLE
     poolAPIUrl = getPoolAPIUrl();
     Serial.println("poolAPIUrl: " + poolAPIUrl);
@@ -56,17 +116,53 @@ void setup_monitor(void){
 
 unsigned long mGlobalUpdate =0;
 
+static void beginHttp(HTTPClient &http, const char *url)
+{
+#ifdef GUARDIAN
+    http.setTimeout(4000);
+    http.setUserAgent("Mozilla/5.0");
+#else
+    http.setTimeout(10000);
+#endif
+    http.begin(url);
+}
+
+static void storeGlobalHash(double hashrate)
+{
+    if (!(hashrate > 1e15))
+        return;
+    double eh = hashrate / 1e18;
+    char buf[16];
+    if (eh >= 100.0)
+        snprintf(buf, sizeof(buf), "%.0f", eh);
+    else
+        snprintf(buf, sizeof(buf), "%.1f", eh);
+    gData.globalHash = buf;
+}
+
+static void storeDifficulty(double difficulty)
+{
+    if (!(difficulty > 1e9))
+        return;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.2fT", difficulty / 1e12);
+    gData.difficulty = buf;
+}
+
 void updateGlobalData(void){
     
-    if((mGlobalUpdate == 0) || (millis() - mGlobalUpdate > UPDATE_Global_min * 60 * 1000)){
-    
-        if (WiFi.status() != WL_CONNECTED) return;
-            
-        //Make first API call to get global hash and current difficulty
-        HTTPClient http;
-        http.setTimeout(10000);
-        try {
-        http.begin(getGlobalHash);
+    if (s_cacheOnly || WiFi.status() != WL_CONNECTED)
+        return;
+
+    bool needHash = (mGlobalUpdate == 0) || (millis() - mGlobalUpdate > UPDATE_Global_min * 60 * 1000);
+    bool needFee = (mFeeUpdate == 0) || (millis() - mFeeUpdate > UPDATE_Global_min * 60 * 1000);
+    if (!needHash && !needFee)
+        return;
+
+    HTTPClient http;
+    try {
+    if (needHash) {
+        beginHttp(http, getGlobalHash);
         int httpCode = http.GET();
 
         if (httpCode == HTTP_CODE_OK) {
@@ -74,32 +170,29 @@ void updateGlobalData(void){
             
             StaticJsonDocument<1024> doc;
             deserializeJson(doc, payload);
-            String temp = "";
-            if (doc.containsKey("currentHashrate")) temp = String(doc["currentHashrate"].as<float>());
-            if(temp.length()>18 + 3) //Exahashes more than 18 digits + 3 digits decimals
-              gData.globalHash = temp.substring(0,temp.length()-18 - 3);
-            if (doc.containsKey("currentDifficulty")) temp = String(doc["currentDifficulty"].as<float>());
-            if(temp.length()>10 + 3){ //Terahash more than 10 digits + 3 digit decimals
-              temp = temp.substring(0,temp.length()-10 - 3);
-              gData.difficulty = temp.substring(0,temp.length()-2) + "." + temp.substring(temp.length()-2,temp.length()) + "T";
-            }
+            if (doc.containsKey("currentHashrate"))
+                storeGlobalHash(doc["currentHashrate"].as<double>());
+            if (doc.containsKey("currentDifficulty"))
+                storeDifficulty(doc["currentDifficulty"].as<double>());
             doc.clear();
 
-            mGlobalUpdate = millis();
+            if (gData.globalHash.length() && gData.difficulty.length()) {
+                mGlobalUpdate = millis();
+                Serial.printf("[NET] hash %s EH/s diff %s\n", gData.globalHash.c_str(), gData.difficulty.c_str());
+            }
         }
         http.end();
+    }
 
-      
-        //Make third API call to get fees
-        http.begin(getFees);
-        httpCode = http.GET();
+    if (needFee) {
+        beginHttp(http, getFees);
+        int httpCode = http.GET();
 
         if (httpCode == HTTP_CODE_OK) {
             String payload = http.getString();
             
             StaticJsonDocument<1024> doc;
             deserializeJson(doc, payload);
-            String temp = "";
             if (doc.containsKey("halfHourFee")) gData.halfHourFee = doc["halfHourFee"].as<int>();
 #ifdef SCREEN_FEES_ENABLE
             if (doc.containsKey("fastestFee"))  gData.fastestFee = doc["fastestFee"].as<int>();
@@ -109,38 +202,54 @@ void updateGlobalData(void){
 #endif
             doc.clear();
 
-            mGlobalUpdate = millis();
+            if (gData.halfHourFee >= 0) {
+                mFeeUpdate = millis();
+                Serial.printf("[NET] fee %d sat/vB\n", gData.halfHourFee);
+            }
         }
         
         http.end();
-        } catch(...) {
-          Serial.println("Global data HTTP error caught");
-          http.end();
-        }
+    }
+    } catch(...) {
+      Serial.println("Global data HTTP error caught");
+      http.end();
     }
 }
 
 unsigned long mHeightUpdate = 0;
 
+static bool digitsOnly(const String &text)
+{
+    if (!text.length())
+        return false;
+    for (unsigned i = 0; i < text.length(); ++i) {
+        char c = text.charAt(i);
+        if (c < '0' || c > '9')
+            return false;
+    }
+    return true;
+}
+
 String getBlockHeight(void){
     
-    if((mHeightUpdate == 0) || (millis() - mHeightUpdate > UPDATE_Height_min * 60 * 1000)){
+    if(!s_cacheOnly && ((mHeightUpdate == 0) || (millis() - mHeightUpdate > UPDATE_Height_min * 60 * 1000))){
     
         if (WiFi.status() != WL_CONNECTED) return current_block;
             
         HTTPClient http;
-        http.setTimeout(10000);
         try {
-        http.begin(getHeightAPI);
+        beginHttp(http, getHeightAPI);
         int httpCode = http.GET();
 
         if (httpCode == HTTP_CODE_OK) {
             String payload = http.getString();
             payload.trim();
 
-            current_block = payload;
-
-            mHeightUpdate = millis();
+            if (digitsOnly(payload) && payload.toInt() > 100000) {
+                current_block = payload;
+                mHeightUpdate = millis();
+                Serial.printf("[NET] height %s\n", current_block.c_str());
+            }
         }        
         http.end();
         } catch(...) {
@@ -154,22 +263,28 @@ String getBlockHeight(void){
 
 unsigned long mBTCUpdate = 0;
 
+static String formatBtcPrice(void)
+{
+#ifdef GUARDIAN
+    if (mBTCUpdate == 0)
+        return String("--");
+#endif
+    static char price_buffer[16];
+    snprintf(price_buffer, sizeof(price_buffer), "$%u", bitcoin_price);
+    return String(price_buffer);
+}
+
 String getBTCprice(void){
     
-    if((mBTCUpdate == 0) || (millis() - mBTCUpdate > UPDATE_BTC_min * 60 * 1000)){
+    if(!s_cacheOnly && ((mBTCUpdate == 0) || (millis() - mBTCUpdate > UPDATE_BTC_min * 60 * 1000))){
     
-        if (WiFi.status() != WL_CONNECTED) {
-            static char price_buffer[16];
-            snprintf(price_buffer, sizeof(price_buffer), "$%u", bitcoin_price);
-            return String(price_buffer);
-        }
+        if (WiFi.status() != WL_CONNECTED)
+            return formatBtcPrice();
         
         HTTPClient http;
-        http.setTimeout(10000);
-        bool priceUpdated = false;
 
         try {
-        http.begin(getBTCAPI);
+        beginHttp(http, getBTCAPI);
         int httpCode = http.GET();
 
         if (httpCode == HTTP_CODE_OK) {
@@ -179,12 +294,15 @@ String getBTCprice(void){
             deserializeJson(doc, payload);
           
             if (doc.containsKey("bitcoin") && doc["bitcoin"].containsKey("usd")) {
-                bitcoin_price = doc["bitcoin"]["usd"];
+                unsigned int usd = doc["bitcoin"]["usd"].as<unsigned int>();
+                if (usd > 0) {
+                    bitcoin_price = usd;
+                    mBTCUpdate = millis();
+                    Serial.printf("[NET] price $%u\n", bitcoin_price);
+                }
             }
 
             doc.clear();
-
-            mBTCUpdate = millis();
         }
         
         http.end();
@@ -194,10 +312,98 @@ String getBTCprice(void){
         }
     }  
   
-  static char price_buffer[16];
-  snprintf(price_buffer, sizeof(price_buffer), "$%u", bitcoin_price);
-  return String(price_buffer);
+  return formatBtcPrice();
 }
+
+#ifdef GUARDIAN
+static bool guardianNetworkFresh(void)
+{
+  if (mBTCUpdate == 0 || mHeightUpdate == 0 || mGlobalUpdate == 0 || mFeeUpdate == 0)
+    return false;
+  unsigned long now = millis();
+  if (now - mBTCUpdate > UPDATE_BTC_min * 60UL * 1000UL)
+    return false;
+  if (now - mHeightUpdate > UPDATE_Height_min * 60UL * 1000UL)
+    return false;
+  if (now - mGlobalUpdate > UPDATE_Global_min * 60UL * 1000UL)
+    return false;
+  if (now - mFeeUpdate > UPDATE_Global_min * 60UL * 1000UL)
+    return false;
+  return true;
+}
+
+bool guardianFetchNetwork(void)
+{
+  if (s_cacheOnly || WiFi.status() != WL_CONNECTED)
+    return false;
+  if (guardianNetworkFresh())
+    return true;
+
+  HTTPClient http;
+  bool applied = false;
+  try {
+    beginHttp(http, getGuardianAPI);
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      StaticJsonDocument<768> doc;
+      if (!deserializeJson(doc, payload)) {
+        if (doc.containsKey("btc_usd") && !doc["btc_usd"].isNull()) {
+          unsigned int usd = doc["btc_usd"].as<unsigned int>();
+          if (usd > 1000) {
+            bitcoin_price = usd;
+            mBTCUpdate = millis();
+            applied = true;
+            Serial.printf("[NET] price $%u\n", bitcoin_price);
+          }
+        }
+        if (doc.containsKey("block_height") && !doc["block_height"].isNull()) {
+          unsigned long height = doc["block_height"].as<unsigned long>();
+          if (height > 100000) {
+            current_block = String(height);
+            mHeightUpdate = millis();
+            applied = true;
+            Serial.printf("[NET] height %s\n", current_block.c_str());
+          }
+        }
+        if (doc.containsKey("nethash_ehs") && !doc["nethash_ehs"].isNull()) {
+          double eh = doc["nethash_ehs"].as<double>();
+          if (eh > 1.0) {
+            char buf[16];
+            if (eh >= 100.0)
+              snprintf(buf, sizeof(buf), "%.0f", eh);
+            else
+              snprintf(buf, sizeof(buf), "%.1f", eh);
+            gData.globalHash = buf;
+          }
+        }
+        if (doc.containsKey("difficulty") && !doc["difficulty"].isNull())
+          storeDifficulty(doc["difficulty"].as<double>());
+        if (gData.globalHash.length() && gData.difficulty.length()) {
+          mGlobalUpdate = millis();
+          applied = true;
+          Serial.printf("[NET] hash %s EH/s diff %s\n", gData.globalHash.c_str(), gData.difficulty.c_str());
+        }
+        if (doc.containsKey("fee_sat_vb") && !doc["fee_sat_vb"].isNull()) {
+          int fee = doc["fee_sat_vb"].as<int>();
+          if (fee >= 0) {
+            gData.halfHourFee = fee;
+            mFeeUpdate = millis();
+            applied = true;
+            Serial.printf("[NET] fee %d sat/vB\n", fee);
+          }
+        }
+      }
+    }
+    http.end();
+  } catch (...) {
+    Serial.println("Guardian API HTTP error caught");
+    http.end();
+    applied = false;
+  }
+  return applied;
+}
+#endif
 
 unsigned long mTriggerUpdate = 0;
 unsigned long initialMillis = millis();
@@ -207,7 +413,7 @@ unsigned long mPoolUpdate = 0;
 void getTime(unsigned long* currentHours, unsigned long* currentMinutes, unsigned long* currentSeconds){
   
   //Check if need an NTP call to check current time
-  if((mTriggerUpdate == 0) || (millis() - mTriggerUpdate > UPDATE_PERIOD_h * 60 * 60 * 1000)){ //60 sec. * 60 min * 1000ms
+  if(!s_cacheOnly && ((mTriggerUpdate == 0) || (millis() - mTriggerUpdate > UPDATE_PERIOD_h * 60 * 60 * 1000))){ //60 sec. * 60 min * 1000ms
     if(WiFi.status() == WL_CONNECTED) {
         if(timeClient.update()) mTriggerUpdate = millis(); //NTP call to get current time
         initialTime = timeClient.getEpochTime(); // Guarda la hora inicial (en segundos desde 1970)
@@ -243,6 +449,10 @@ String getDate(){
 }
 
 String getTime(void){
+#ifdef GUARDIAN
+  if (mTriggerUpdate == 0)
+    return String("--:--");
+#endif
   unsigned long currentHours, currentMinutes, currentSeconds;
   getTime(&currentHours, &currentMinutes, &currentSeconds);
 
@@ -268,8 +478,35 @@ static std::list<double> s_hashrate_avg_list;
 static double s_hashrate_summ = 0.0;
 static uint8_t s_hashrate_recalc = 0;
 
+static String formatAvgHashrate(double avg_hashrate)
+{
+  if (avg_hashrate < 0.0)
+    avg_hashrate = 0.0;
+
+  switch (s_hashrate_scale)
+  {
+    case HashRateScale_99KH:
+      return String(avg_hashrate, 2);
+    case HashRateScale_999KH:
+      return String(avg_hashrate, 1);
+    default:
+      return String((int)avg_hashrate);
+  }
+}
+
 String getCurrentHashRate(unsigned long mElapsed)
 {
+  if (s_freezeHashrate)
+  {
+    double avg = 0.0;
+    if (!s_hashrate_avg_list.empty())
+      avg = s_hashrate_summ / (double)s_hashrate_avg_list.size();
+    return formatAvgHashrate(avg);
+  }
+
+  if (mElapsed == 0)
+    mElapsed = 1;
+
   double hashrate = (double)elapsedKHs * 1000.0 / (double)mElapsed;
 
   s_hashrate_summ += hashrate;
@@ -307,15 +544,7 @@ String getCurrentHashRate(unsigned long mElapsed)
     }
   }
 
-  switch (s_hashrate_scale)
-  {
-    case HashRateScale_99KH:
-      return String(avg_hashrate, 2);
-    case HashRateScale_999KH:
-      return String(avg_hashrate, 1);
-    default:
-      return String((int)avg_hashrate );
-  }
+  return formatAvgHashrate(avg_hashrate);
 }
 
 mining_data getMiningData(unsigned long mElapsed)
@@ -345,6 +574,9 @@ mining_data getMiningData(unsigned long mElapsed)
   data.valids = valids;
   data.temp = String(temperatureRead(), 0);
   data.currentTime = getTime();
+  char poolBuf[16];
+  snprintf(poolBuf, sizeof(poolBuf), "%.4g", currentPoolDifficulty);
+  data.poolDiff = poolBuf;
 
   return data;
 }
@@ -392,15 +624,27 @@ coin_data getCoinData(unsigned long mElapsed)
   data.economyFee = String(gData.economyFee);
   data.minimumFee = String(gData.minimumFee);
 #endif
+#ifdef GUARDIAN
+  if (gData.halfHourFee >= 0)
+    data.halfHourFee = String(gData.halfHourFee) + " sat/vB";
+  else
+    data.halfHourFee = "";
+#else
   data.halfHourFee = String(gData.halfHourFee) + " sat/vB";
+#endif
   data.netwrokDifficulty = gData.difficulty;
   data.globalHashRate = gData.globalHash;
   data.blockHeight = getBlockHeight();
 
   unsigned long currentBlock = data.blockHeight.toInt();
-  unsigned long remainingBlocks = (((currentBlock / HALVING_BLOCKS) + 1) * HALVING_BLOCKS) - currentBlock;
-  data.progressPercent = (HALVING_BLOCKS - remainingBlocks) * 100 / HALVING_BLOCKS;
-  data.remainingBlocks = String(remainingBlocks) + " BLOCKS";
+  if (currentBlock >= 100000) {
+    unsigned long remainingBlocks = (((currentBlock / HALVING_BLOCKS) + 1) * HALVING_BLOCKS) - currentBlock;
+    data.progressPercent = (HALVING_BLOCKS - remainingBlocks) * 100 / HALVING_BLOCKS;
+    data.remainingBlocks = String(remainingBlocks) + " BLOCKS";
+  } else {
+    data.progressPercent = 0;
+    data.remainingBlocks = "";
+  }
 
   return data;
 }

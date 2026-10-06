@@ -30,6 +30,10 @@
 #define getFees "https://mempool.space/api/v1/fees/recommended"
 #define UPDATE_Global_min 2
 
+#ifdef GUARDIAN
+#define getGuardianAPI "https://bo.galosoft.cz/api/v1/guardian"
+#endif
+
 //API public-pool.io
 // https://public-pool.io:40557/api/client/btcString
 #define getPublicPool "https://public-pool.io:40557/api/client/" // +btcString
@@ -77,6 +81,7 @@ typedef struct {
   String valids;
   String temp;
   String currentTime;
+  String poolDiff;
 }mining_data;
 
 typedef struct {
@@ -124,6 +129,10 @@ typedef struct{
 }pool_data;
 
 void setup_monitor(void);
+void monitorSetCacheOnly(bool on);
+void monitorFreezeHashrate(bool on);
+void monitorStartNetworkTask(void);
+String getBTCprice(void);
 
 mining_data getMiningData(unsigned long mElapsed);
 clock_data getClockData(unsigned long mElapsed);

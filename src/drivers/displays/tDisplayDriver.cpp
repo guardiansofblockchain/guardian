@@ -10,6 +10,15 @@
 #include "monitor.h"
 #include "OpenFontRender.h"
 #include "rotation.h"
+#ifdef GUARDIAN
+#include "media/images_guardian_320_170.h"
+#include "media/guardian_miner_bg.h"
+#include "media/guardian_cycle_bg.h"
+#if __has_include("media/DMSans_subset.h")
+#include "media/DMSans_subset.h"
+#define GUARDIAN_USE_DM_SANS
+#endif
+#endif
 
 #define WIDTH 340
 #define HEIGHT 170
@@ -37,10 +46,14 @@ void tDisplay_Init(void)
   background.setSwapBytes(true);
   render.setDrawer(background);  // Link drawing object to background instance (so font will be rendered on background)
   render.setLineSpaceRatio(0.9); // Espaciado entre texto
+  render.setBackgroundFillMethod(BgFillMethod::None);
 
   // Load the font and check it can be read OK
-  // if (render.loadFont(NotoSans_Bold, sizeof(NotoSans_Bold))) {
+#ifdef GUARDIAN_USE_DM_SANS
+  if (render.loadFont(DMSans_Regular_subset, DMSans_Regular_subset_SIZE))
+#else
   if (render.loadFont(DigitalNumbers, sizeof(DigitalNumbers)))
+#endif
   {
     Serial.println("Initialise error");
     return;
@@ -59,10 +72,116 @@ void tDisplay_AlternateRotation(void)
   tft.setRotation( flipRotation(tft.getRotation()) );
 }
 
+#ifdef GUARDIAN
+static String guardianNumber(const String &src)
+{
+  String out;
+  for (unsigned i = 0; i < src.length(); ++i)
+  {
+    char c = src.charAt(i);
+    if ((c >= '0' && c <= '9') || c == '.' || c == ',')
+      out += c;
+    else if (out.length() > 0)
+      break;
+  }
+  return out;
+}
+
+static String guardianGrouped(const String &src)
+{
+  String n = guardianNumber(src);
+  String out;
+  int count = 0;
+  for (int i = (int)n.length() - 1; i >= 0; --i)
+  {
+    if (count > 0 && (count % 3) == 0)
+      out = String(" ") + out;
+    out = String(n.charAt(i)) + out;
+    count++;
+  }
+  return out;
+}
+
+static const uint16_t gWhite = 0xFFFF;
+static const uint16_t gPrice = 0xD6BB;
+static const uint16_t gMuted = 0x9D15;  // #99a1af
+static const uint16_t gCyan = 0x0739;   // #00e5cf
+static const uint16_t gInk = 0x10A4;    // #121523
+static const uint16_t gBg = 0x1082;
+static const uint16_t gCard = 0x18E4;
+static const uint16_t gYellow = 0xFDE0; // #ffbf00
+static const uint16_t gPill = 0x05D4;   // #02b9a7
+
+static void guardianPillPrice(const char *price)
+{
+  String grouped = guardianGrouped(price ? price : "");
+  render.setFontSize(9);
+  if (!grouped.length() || grouped == "0")
+  {
+    render.rdrawString("--", 261, 16, gPrice, gCard);
+    return;
+  }
+  String line = grouped + " USD";
+  render.rdrawString(line.c_str(), 261, 16, gPrice, gCard);
+}
+
+static const char *guardianOrDash(const char *value)
+{
+  return (value && value[0]) ? value : "--";
+}
+
+static void guardianBottomBars(const char *hashRate, const char *blockHeight)
+{
+  render.setFontSize(16);
+  render.cdrawString(guardianOrDash(hashRate), 82, 134, gInk, gYellow);
+  render.setFontSize(9);
+  render.cdrawString("KH/s", 122, 140, gInk, gYellow);
+
+  render.setFontSize(16);
+  render.cdrawString(guardianOrDash(blockHeight), 222, 134, gInk, gCyan);
+  render.setFontSize(7);
+  render.cdrawString("CURRENT", 272, 130, gInk, gCyan);
+  render.cdrawString("BLOCK", 272, 140, gInk, gCyan);
+}
+#endif
+
 void tDisplay_MinerScreen(unsigned long mElapsed)
 {
   mining_data data = getMiningData(mElapsed);
 
+#ifdef GUARDIAN
+  background.fillSprite(0x1082);
+  background.pushImage(0, 0, guardianMinerWidth, guardianMinerHeight, guardianMinerScreen);
+
+  String price = getBTCprice();
+  guardianPillPrice(price.c_str());
+
+  render.setFontSize(8);
+  render.cdrawString("CURRENT HASHRATE", 160, 50, gMuted, gBg);
+
+  render.setFontSize(30);
+  render.cdrawString(data.currentHashRate.c_str(), 152, 64, gWhite, gBg);
+
+  String totalMh = guardianGrouped(data.totalMHashes.c_str());
+  if (!totalMh.length())
+    totalMh = "0";
+  totalMh += " MH";
+  render.setFontSize(7);
+  render.cdrawString(totalMh.c_str(), 160, 102, gMuted, gBg);
+
+  render.setFontSize(9);
+  render.cdrawString(data.valids.c_str(), 45, 139, gWhite, gCard);
+  render.cdrawString(data.bestDiff.c_str(), 122, 139, gWhite, gCard);
+  String tempLabel = data.temp + "\xC2\xB0";
+  render.cdrawString(tempLabel.c_str(), 199, 139, gWhite, gCard);
+  render.cdrawString(data.completedShares.c_str(), 276, 139, gWhite, gCard);
+
+  render.setFontSize(7);
+  render.cdrawString("BLOCKS", 45, 151, gMuted, gCard);
+  render.cdrawString("DIFF", 122, 151, gMuted, gCard);
+  render.cdrawString("TEMP", 199, 151, gMuted, gCard);
+  render.cdrawString("SHARES", 276, 151, gMuted, gCard);
+#else
   // Print background screen
   background.pushImage(0, 0, MinerWidth, MinerHeight, MinerScreen);
 
@@ -104,6 +223,7 @@ void tDisplay_MinerScreen(unsigned long mElapsed)
   // Print Hour
   render.setFontSize(10);
   render.rdrawString(data.currentTime.c_str(), 286, 1, TFT_BLACK);
+#endif
 
   // Push prepared background to screen
   background.pushSprite(0, 0);
@@ -113,6 +233,17 @@ void tDisplay_ClockScreen(unsigned long mElapsed)
 {
   clock_data data = getClockData(mElapsed);
 
+#ifdef GUARDIAN
+  background.fillSprite(0x1082);
+  background.pushImage(0, 0, guardianClockWidth, guardianClockHeight, guardianClockScreen);
+  guardianPillPrice(data.btcPrice.c_str());
+
+  render.setFontSize(8);
+  render.cdrawString("CURRENT TIME", 160, 50, gMuted, gBg);
+  render.setFontSize(30);
+  render.cdrawString(data.currentTime.c_str(), 160, 64, gWhite, gBg);
+  guardianBottomBars(data.currentHashRate.c_str(), data.blockHeight.c_str());
+#else
   // Print background screen
   background.pushImage(0, 0, minerClockWidth, minerClockHeight, minerClockScreen);
 
@@ -142,6 +273,7 @@ void tDisplay_ClockScreen(unsigned long mElapsed)
   background.setTextColor(0xDEDB, TFT_BLACK);
 
   background.drawString(data.currentTime.c_str(), 130, 50, GFXFF);
+#endif
 
   // Push prepared background to screen
   background.pushSprite(0, 0);
@@ -151,6 +283,59 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
 {
   coin_data data = getCoinData(mElapsed);
 
+#ifdef GUARDIAN
+  background.fillSprite(0x1082);
+  background.pushImage(0, 0, guardianGlobalWidth, guardianGlobalHeight, guardianGlobalScreen);
+  guardianPillPrice(data.btcPrice.c_str());
+
+  String difficulty = guardianNumber(data.netwrokDifficulty);
+  String fee = guardianNumber(data.halfHourFee);
+  String left = guardianNumber(data.remainingBlocks);
+
+  if (difficulty.length())
+  {
+    render.setFontSize(18);
+    render.rdrawString(difficulty.c_str(), 78, 68, gWhite, gBg);
+    render.setFontSize(12);
+    render.cdrawString("T", 90, 74, gCyan, gBg);
+  }
+
+  if (fee.length())
+  {
+    render.setFontSize(18);
+    render.rdrawString(fee.c_str(), 256, 68, gWhite, gBg);
+    render.setFontSize(9);
+    render.cdrawString("sat/vB", 276, 74, gCyan, gBg);
+  }
+
+  render.setFontSize(16);
+  render.cdrawString(guardianOrDash(data.blockHeight.c_str()), 43, 125, gInk, gCyan);
+  render.setFontSize(7);
+  render.cdrawString("CURRENT", 96, 124, gInk, gCyan);
+  render.cdrawString("BLOCK", 96, 134, gInk, gCyan);
+
+  if (left.length())
+  {
+    char leftLine[28];
+    snprintf(leftLine, sizeof(leftLine), "%s BLOCKS LEFT", left.c_str());
+    render.setFontSize(7);
+    render.cdrawString(leftLine, 56, 147, gWhite, gPill);
+  }
+
+  render.setFontSize(8);
+  render.cdrawString("HALVING", 160, 134, gWhite, gInk);
+
+  if (data.globalHashRate.length())
+  {
+    render.setFontSize(16);
+    render.rdrawString(data.globalHashRate.c_str(), 230, 128, gInk, gYellow);
+    render.setFontSize(8);
+    render.cdrawString("EH/s", 248, 134, gInk, gYellow);
+  }
+  render.setFontSize(7);
+  render.cdrawString("GLOBAL", 286, 126, gInk, gYellow);
+  render.cdrawString("HASHRATE", 286, 136, gInk, gYellow);
+#else
   // Print background screen
   background.pushImage(0, 0, globalHashWidth, globalHashHeight, globalHashScreen);
 
@@ -201,6 +386,7 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
   background.setTextDatum(MC_DATUM);
   background.setTextColor(TFT_BLACK);
   background.drawString(data.remainingBlocks.c_str(), 72, 159, FONT2);
+#endif
 
   // Push prepared background to screen
   background.pushSprite(0, 0);
@@ -210,8 +396,20 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
 void tDisplay_BTCprice(unsigned long mElapsed)
 {
   clock_data data = getClockData(mElapsed);
+
+#ifdef GUARDIAN
+  background.fillSprite(0x1082);
+  background.pushImage(0, 0, guardianPriceWidth, guardianPriceHeight, guardianPriceScreen);
+  String price = guardianGrouped(data.btcPrice);
+  render.setFontSize(24);
+  if (!price.length())
+    render.cdrawString("--", 160, 64, gWhite, gBg);
+  else
+    render.rdrawString(price.c_str(), 208, 64, gWhite, gBg);
+  guardianBottomBars(data.currentHashRate.c_str(), data.blockHeight.c_str());
+#else
   data.currentDate ="01/12/2023";
-  
+
   //if(data.currentDate.indexOf("12/2023")>) { tDisplay_ChristmasContent(data); return; }
 
   // Print background screen
@@ -244,6 +442,7 @@ void tDisplay_BTCprice(unsigned long mElapsed)
   background.setTextSize(1);
   background.setTextColor(0xDEDB, TFT_BLACK);
   background.drawString(data.btcPrice.c_str(), 300, 58, GFXFF);
+#endif
 
   // Push prepared background to screen
   background.pushSprite(0, 0);
@@ -251,15 +450,24 @@ void tDisplay_BTCprice(unsigned long mElapsed)
 
 void tDisplay_LoadingScreen(void)
 {
+#ifdef GUARDIAN
+  tft.fillScreen(TFT_BLACK);
+  tft.pushImage(0, 0, guardianInitWidth, guardianInitHeight, guardianInitScreen);
+#else
   tft.fillScreen(TFT_BLACK);
   tft.pushImage(0, 0, initWidth, initHeight, initScreen);
   tft.setTextColor(TFT_BLACK);
   tft.drawString(CURRENT_VERSION, 24, 147, FONT2);
+#endif
 }
 
 void tDisplay_SetupScreen(void)
 {
+#ifdef GUARDIAN
+  tft.pushImage(0, 0, guardianSetupWidth, guardianSetupHeight, guardianSetupScreen);
+#else
   tft.pushImage(0, 0, setupModeWidth, setupModeHeight, setupModeScreen);
+#endif
 }
 
 void tDisplay_AnimateCurrentScreen(unsigned long frame)
