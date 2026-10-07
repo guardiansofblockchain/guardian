@@ -1,7 +1,9 @@
 #ifndef __DEVICE_H__
 #define __DEVICE_H__
 
-#if defined(NERDMINERV2)
+#if defined(NERD_NOS)
+#include "nerdnos.h"
+#elif defined(NERDMINERV2)
 #include "nerdMinerV2.h"
 #elif defined(M5STICK_C)
 #include "M5Stick-C.h"

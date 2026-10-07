@@ -9,6 +9,9 @@
 #include "stratum.h"
 #include "mining.h"
 #include "utils.h"
+#ifdef NERD_NOS
+#include "mining_guardian_max.h"
+#endif
 #include "monitor.h"
 #include "timeconst.h"
 #include "drivers/displays/display.h"
@@ -135,12 +138,14 @@ bool checkPoolInactivity(unsigned int keepAliveTime, unsigned long inactivityTim
       }*/
     }
 
+#ifndef NERD_NOS
     if(elapsedKHs == 0){
       //Check if hashrate is 0 during inactivityTIme
       if(mStart0Hashrate == 0) mStart0Hashrate  = time_now; 
       if((time_now-mStart0Hashrate) > inactivityTime) { mStart0Hashrate=0; return true;}
       return false;
     }
+#endif
 
   mStart0Hashrate = 0;
   return false;
@@ -431,6 +436,9 @@ void runStratumWorker(void *name) {
                                           //For i2c slave we give nonces from 0x20000000, that is 0x10000000 nonces per slave
                                           i2c_feed_slaves(i2c_slave_vector, job_pool & 0xFF, 0x20, currentPoolDifficulty, mMiner.bytearray_blockheader);
                                           #endif
+#ifdef NERD_NOS
+                                          miningPublishAsicWork();
+#endif
                                       } else
                                       {
                                         Serial.println("Parsing error, need restart");
@@ -1302,3 +1310,51 @@ void runMonitor(void *name)
     frame++;
   }
 }
+
+#ifdef NERD_NOS
+volatile uint32_t g_asicJobEpoch = 0;
+static AsicWorkSnapshot s_asic_work;
+static std::mutex s_asic_mutex;
+
+void miningPublishAsicWork()
+{
+  std::lock_guard<std::mutex> lock(s_asic_mutex);
+  s_asic_work.job_id = mJob.job_id;
+  s_asic_work.prev_block_hash = mJob.prev_block_hash;
+  s_asic_work.coinb1 = mJob.coinb1;
+  s_asic_work.coinb2 = mJob.coinb2;
+  s_asic_work.nbits = mJob.nbits;
+  s_asic_work.version = mJob.version;
+  s_asic_work.ntime = mJob.ntime;
+  s_asic_work.extranonce1 = mWorker.extranonce1;
+  s_asic_work.extranonce2_size = mWorker.extranonce2_size;
+  strncpy(s_asic_work.wName, mWorker.wName, sizeof(s_asic_work.wName) - 1);
+  s_asic_work.wName[sizeof(s_asic_work.wName) - 1] = 0;
+  s_asic_work.merkle_count = 0;
+  for (JsonVariant branch : mJob.merkle_branch)
+  {
+    if (s_asic_work.merkle_count >= 32)
+      break;
+    s_asic_work.merkle[s_asic_work.merkle_count++] = branch.as<String>();
+  }
+  g_asicJobEpoch++;
+}
+
+bool miningCopyAsicWork(AsicWorkSnapshot &out)
+{
+  std::lock_guard<std::mutex> lock(s_asic_mutex);
+  if (!s_asic_work.job_id.length())
+    return false;
+  out = s_asic_work;
+  double diff = currentPoolDifficulty;
+  if (diff < 1.0)
+    diff = 1.0;
+  out.difficulty = (uint32_t)diff;
+  return true;
+}
+
+WiFiClient &miningPoolClient()
+{
+  return client;
+}
+#endif

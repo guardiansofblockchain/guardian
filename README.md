@@ -137,7 +137,7 @@ Note: when BTC address of your selected wallet is not provided, mining will not 
   "SSID": "myWifiSSID",  
   "WifiPW": "myWifiPassword",  
   "PoolUrl": "public-pool.io",  
-  "PoolPort": 21496,
+  "PoolPort": 3333,
   "PoolPassword": "x",
   "BtcWallet": "walletID",  
   "Timezone": 2,  
@@ -155,7 +155,7 @@ Recommended low difficulty share pools:
 
 | Pool URL          | Port  | Web URL                    | Status                                                             |
 | ----------------- | ----- | -------------------------- | ------------------------------------------------------------------ |
-| public-pool.io    | 21496 | https://web.public-pool.io | Open Source Solo Bitcoin Mining Pool supporting open source miners |
+| public-pool.io    | 3333 (also 21496) | https://web.public-pool.io | Open Source Solo Bitcoin Mining Pool supporting open source miners |
 | pool.nerdminers.org    | 3333  | https://nerdminers.org     | The official Nerdminer pool site - Mantained by @golden-guy |
 | pool.nerdminer.io | 3333  | https://nerdminer.io       | Mantained by CHMEX                                                 |
 | pool.pyblock.xyz  | 3333  | https://pool.pyblock.xyz/  | Mantained by curly60e                                              |

@@ -1,17 +1,94 @@
 #!/usr/bin/env python3
-"""Rebuild Guardian 320x170 backgrounds from the full Figma 632 exports.
+"""Rebuild Guardian 320x170 backgrounds from the full Figma 632x332 exports.
+
+One shared pipeline for both products. Guardian MINI and Guardian MAX use the
+same layout; the only differences are the logo badge and the hashrate unit next
+to the big miner number (KH/s vs GH/s), which stays in the bitmap.
 
 Erases only the glyphs the firmware redraws. Chrome (pill, wifi, icons,
-KH/s, USD, GLOBAL STATS, bar shapes) stays in the bitmap.
+units, GLOBAL STATS, bar shapes, HALVING pill, BLOCKS LEFT pill) stays.
+
+Inputs (tools/figma):
+  MINI: miner_632.png clock_632.png price_632.png global_632.png logo_guardian_mini.png
+  MAX:  max_miner_632.png (GH/s unit) + the MINI clock/price/global frames,
+        logo_guardian_max.png (rasterized from logo_guardian_max.svg, Figma 755:127)
+
+Outputs:
+  MINI: src/media/guardian_miner_bg.h, src/media/guardian_cycle_bg.h,
+        tools/figma/<screen>_bg_320.png, tools/figma/preview_<screen>.png
+  MAX:  src/media/guardian_max_bg.h,
+        tools/figma/max_<screen>_bg_320.png, tools/figma/preview_max_<screen>.png
+
+Usage:
+  .venv/bin/python tools/rebuild_guardian_screens.py            # both variants
+  .venv/bin/python tools/rebuild_guardian_screens.py mini
+  .venv/bin/python tools/rebuild_guardian_screens.py max
 """
 import os
+import sys
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIG = os.path.join(ROOT, "tools", "figma")
 FONT = os.path.join(ROOT, "tools", "fonts", "DMSans-Regular.ttf")
+FONT_BOLD = os.path.join(ROOT, "fonts", "static", "DMSans-Bold.ttf")
 SX = 320 / 632.0
 SY = 170 / 332.0
+
+SCREENS = ("miner", "clock", "price", "global")
+
+YELLOW = (255, 191, 0)
+CYAN = (0, 229, 207)
+CARD = (23, 26, 42)
+
+VARIANTS = {
+    "mini": {
+        "prefix": "",
+        "logo": "logo_guardian_mini.png",
+        # right edge of the big hashrate cover box; "KH/s" starts at x=423
+        "hashrate_right": 416,
+        "sample": {
+            "price": "85 680 USD",
+            "price_big": "85 680",
+            "hashrate": "253.72",
+            "hashrate_short": "253.7",
+            "unit": "KH/s",
+            "total": "21.9 GH",
+            "diff": "0.0000",
+            "block": "970197",
+            "left": "79803 BLOCKS LEFT",
+            "net_diff": "132.72",
+            "fee": "1",
+            "global": "964",
+        },
+    },
+    "max": {
+        "prefix": "max_",
+        "logo": "logo_guardian_max.png",
+        # Only the miner frame comes from the MAX Figma section (it carries the
+        # GH/s unit in the bitmap). Clock, price and global reuse the MINI frames:
+        # the chrome is identical by design, the logo is stamped anyway, and the
+        # MAX global frame in Figma has its title and values shifted ~20px, which
+        # would not line up with the shared firmware coordinates.
+        "sources": {"miner": "max_miner_632.png"},
+        # "GH/s" starts at x=432 on the MAX frame
+        "hashrate_right": 428,
+        "sample": {
+            "price": "128 397 USD",
+            "price_big": "128 397",
+            "hashrate": "200.7",
+            "hashrate_short": "200.7",
+            "unit": "GH/s",
+            "total": "720.5 TH",
+            "diff": "0.001",
+            "block": "885790",
+            "left": "163421 BLOCKS LEFT",
+            "net_diff": "110.56",
+            "fee": "3",
+            "global": "799",
+        },
+    },
+}
 
 
 def rgb565(r, g, b):
@@ -58,24 +135,32 @@ def fill_rect(im, box, color):
             px[x, y] = color
 
 
-def kill_light_to(im, box, color, thresh=110):
+def erase(im, box):
+    """Paint a box with the background interpolated from the rows just outside it."""
     px = im.load()
     x0, y0, x1, y1 = box
+    h = im.size[1]
+    ya = max(0, y0 - 2)
+    yb = min(h - 1, y1 + 1)
+    span = max(1, y1 - y0)
     for y in range(y0, y1):
+        t = (y - y0 + 0.5) / span
         for x in range(x0, x1):
-            r, g, b = px[x, y]
-            if r >= thresh and g >= thresh and b >= thresh:
-                px[x, y] = color
+            px[x, y] = lerp_px(px[x, ya], px[x, yb], t)
 
 
-def prepare(name):
-    im = Image.open(os.path.join(FIG, name + "_632.png")).convert("RGB")
-    return im
+def prepare(variant, name):
+    file_name = variant.get("sources", {}).get(name, name + "_632.png")
+    return Image.open(os.path.join(FIG, file_name)).convert("RGB")
 
 
-def stamp_logo(im):
-    """Replace the stretched screen logo with one uniform render of the component."""
-    logo = Image.open(os.path.join(FIG, "logo_guardian_mini.png")).convert("RGBA")
+def stamp_logo(im, logo_file):
+    """Replace the stretched screen logo with one uniform render of the component.
+
+    The logo PNG is 350x60 on an opaque RGB(23,23,23) background which is keyed
+    out, then scaled to the 242x42 the screen instances use and pasted at (18,18).
+    """
+    logo = Image.open(os.path.join(FIG, logo_file)).convert("RGBA")
     src = logo.load()
     for y in range(logo.size[1]):
         for x in range(logo.size[0]):
@@ -83,184 +168,195 @@ def stamp_logo(im):
             if abs(r - 23) < 14 and abs(g - 23) < 14 and abs(b - 23) < 14:
                 src[x, y] = (0, 0, 0, 0)
     logo = logo.resize((242, 42), Image.Resampling.LANCZOS)
-    px = im.load()
-    x0, y0, x1, y1 = 12, 10, 320, 66
-    ya = max(0, y0 - 2)
-    yb = min(im.size[1] - 1, y1 + 1)
-    span = max(1, y1 - y0)
-    for y in range(y0, y1):
-        t = (y - y0 + 0.5) / span
-        for x in range(x0, x1):
-            px[x, y] = lerp_px(px[x, ya], px[x, yb], t)
+    erase(im, (12, 10, 320, 66))
     im.paste(logo, (18, 18), logo)
 
 
-def build():
-    miner = prepare("miner")
-    stamp_logo(miner)
-    cover_text(miner, (382, 26, 522, 52))
-    cover_text(miner, (220, 96, 410, 120))
-    cover_text(miner, (190, 124, 416, 190))
-    cover_text(miner, (270, 194, 370, 220))
-    card = (23, 26, 42)
+def build(variant):
+    """Shared erase pipeline. All boxes are in 632x332 Figma coordinates."""
+    logo = variant["logo"]
+    pill = (382, 26, 522, 52)
+
+    miner = prepare(variant, "miner")
+    stamp_logo(miner, logo)
+    cover_text(miner, pill)
+    cover_text(miner, (220, 96, 410, 120))                           # CURRENT HASHRATE
+    cover_text(miner, (190, 124, variant["hashrate_right"], 190))    # big number, unit stays
+    cover_text(miner, (270, 194, 370, 220))                          # total hashes
     for box in ((32, 268, 148, 308), (182, 268, 298, 308), (334, 268, 450, 308), (486, 268, 598, 308)):
-        fill_rect(miner, box, card)
+        fill_rect(miner, box, CARD)                                  # card value + label rows
 
-    clock = prepare("clock")
-    stamp_logo(clock)
-    cover_text(clock, (382, 26, 522, 52))
-    cover_text(clock, (230, 96, 400, 120))
-    cover_text(clock, (200, 124, 420, 190))
-    flatten_ink(clock, (100, 260, 270, 300), (255, 191, 0))
-    flatten_ink(clock, (385, 260, 590, 300), (0, 229, 207))
+    clock = prepare(variant, "clock")
+    stamp_logo(clock, logo)
+    cover_text(clock, pill)
+    cover_text(clock, (230, 96, 400, 120))                           # CURRENT TIME
+    cover_text(clock, (200, 124, 420, 190))                          # time
+    flatten_ink(clock, (100, 260, 270, 300), YELLOW)                 # hashrate bar
+    flatten_ink(clock, (385, 260, 590, 300), CYAN)                   # block bar
 
-    price = prepare("price")
-    stamp_logo(price)
-    cover_text(price, (155, 122, 426, 178))
-    flatten_ink(price, (100, 260, 270, 300), (255, 191, 0))
-    flatten_ink(price, (385, 260, 590, 300), (0, 229, 207))
+    price = prepare(variant, "price")
+    stamp_logo(price, logo)
+    cover_text(price, (155, 122, 426, 178))                          # big price
+    cover_text(price, (415, 145, 490, 190))                          # USD, redrawn larger in firmware
+    flatten_ink(price, (100, 260, 270, 300), YELLOW)
+    flatten_ink(price, (385, 260, 590, 300), CYAN)
 
-    glob = prepare("global")
-    stamp_logo(glob)
-    cover_text(glob, (382, 26, 522, 52))
-    cover_text(glob, (36, 128, 156, 172))
-    cover_text(glob, (150, 140, 184, 172))
-    cover_text(glob, (470, 128, 516, 172))
-    cover_text(glob, (508, 138, 602, 174))
-    flatten_ink(glob, (30, 242, 230, 276), (0, 229, 207))
-    cover_text(glob, (40, 284, 176, 300), delta=18)
-    cover_text(glob, (268, 260, 368, 286))
-    flatten_ink(glob, (400, 255, 600, 296), (255, 191, 0))
+    glob = prepare(variant, "global")
+    stamp_logo(glob, logo)
+    cover_text(glob, pill)
+    cover_text(glob, (36, 128, 156, 172))                            # difficulty
+    cover_text(glob, (150, 140, 184, 172))                           # "T"
+    cover_text(glob, (470, 128, 516, 172))                           # fee
+    cover_text(glob, (508, 138, 602, 174))                           # "sat/vB"
+    flatten_ink(glob, (30, 242, 230, 276), CYAN)                     # block bar (pill below stays)
+    cover_text(glob, (40, 284, 176, 300), delta=18)                  # BLOCKS LEFT text, keeps pill
+    cover_text(glob, (268, 260, 368, 286))                           # HALVING text, keeps dark pill
+    flatten_ink(glob, (400, 255, 600, 296), YELLOW)                  # global hashrate bar
 
-    frames = {
-        "miner": miner,
-        "clock": clock,
-        "price": price,
-        "global": glob,
-    }
+    frames = {"miner": miner, "clock": clock, "price": price, "global": glob}
     out = {}
     for key, im in frames.items():
         small = im.resize((320, 170), Image.Resampling.LANCZOS)
-        small.save(os.path.join(FIG, key + "_bg_320.png"))
+        small.save(os.path.join(FIG, variant["prefix"] + key + "_bg_320.png"))
         out[key] = small
     return out
 
 
-def write_headers(frames):
+def dump_bitmap(f, name, wname, hname, im):
+    f.write("const uint16_t {} = 320;\n".format(wname))
+    f.write("const uint16_t {} = 170;\n\n".format(hname))
+    f.write("const unsigned short {}[0xD480] PROGMEM = {{\n".format(name))
+    px = list(im.getdata())
+    for i in range(0, len(px), 16):
+        chunk = px[i:i + 16]
+        f.write("  " + ", ".join("0x{:04X}".format(rgb565(*p)) for p in chunk) + ",\n")
+    f.write("};\n\n")
+
+
+def write_headers_mini(frames):
     media = os.path.join(ROOT, "src", "media")
-
-    def dump(f, name, wname, hname, im):
-        f.write("const uint16_t {} = 320;\n".format(wname))
-        f.write("const uint16_t {} = 170;\n\n".format(hname))
-        f.write("const unsigned short {}[0xD480] PROGMEM = {{\n".format(name))
-        px = list(im.getdata())
-        for i in range(0, len(px), 16):
-            chunk = px[i:i + 16]
-            f.write("  " + ", ".join("0x{:04X}".format(rgb565(*p)) for p in chunk) + ",\n")
-        f.write("};\n\n")
-
-    with open(os.path.join(media, "guardian_miner_bg.h"), "w") as f:
+    path = os.path.join(media, "guardian_miner_bg.h")
+    with open(path, "w") as f:
         f.write("// Guardian miner background 320x170. Live numbers are drawn on top.\n\n")
-        dump(f, "guardianMinerScreen", "guardianMinerWidth", "guardianMinerHeight", frames["miner"])
-    with open(os.path.join(media, "guardian_cycle_bg.h"), "w") as f:
+        dump_bitmap(f, "guardianMinerScreen", "guardianMinerWidth", "guardianMinerHeight", frames["miner"])
+    print("wrote", path)
+    path = os.path.join(media, "guardian_cycle_bg.h")
+    with open(path, "w") as f:
         f.write("// Guardian clock, price and global backgrounds, 320x170.\n")
         f.write("// Live numbers are drawn on top.\n\n")
-        dump(f, "guardianClockScreen", "guardianClockWidth", "guardianClockHeight", frames["clock"])
-        dump(f, "guardianPriceScreen", "guardianPriceWidth", "guardianPriceHeight", frames["price"])
-        dump(f, "guardianGlobalScreen", "guardianGlobalWidth", "guardianGlobalHeight", frames["global"])
+        dump_bitmap(f, "guardianClockScreen", "guardianClockWidth", "guardianClockHeight", frames["clock"])
+        dump_bitmap(f, "guardianPriceScreen", "guardianPriceWidth", "guardianPriceHeight", frames["price"])
+        dump_bitmap(f, "guardianGlobalScreen", "guardianGlobalWidth", "guardianGlobalHeight", frames["global"])
+    print("wrote", path)
 
 
-def paint_preview(frames):
-    font = lambda n: ImageFont.truetype(FONT, n)
+def write_headers_max(frames):
+    media = os.path.join(ROOT, "src", "media")
+    path = os.path.join(media, "guardian_max_bg.h")
+    names = [
+        ("miner", "guardianMaxMinerScreen", "guardianMaxMinerWidth", "guardianMaxMinerHeight"),
+        ("clock", "guardianMaxClockScreen", "guardianMaxClockWidth", "guardianMaxClockHeight"),
+        ("price", "guardianMaxPriceScreen", "guardianMaxPriceWidth", "guardianMaxPriceHeight"),
+        ("global", "guardianMaxGlobalScreen", "guardianMaxGlobalWidth", "guardianMaxGlobalHeight"),
+    ]
+    with open(path, "w") as f:
+        f.write("// Guardian MAX backgrounds, 320x170. Live numbers are drawn on top.\n")
+        f.write("// Same layout as Guardian MINI; only the MAX badge and GH/s differ.\n\n")
+        for key, name, wname, hname in names:
+            dump_bitmap(f, name, wname, hname, frames[key])
+    print("wrote", path)
 
-    def text(dr, s, xy, size, fill, anchor):
-        dr.text(xy, s, font=font(size), fill=fill, anchor=anchor)
 
+def paint_preview(variant, frames):
+    """Approximate the firmware draw calls (same coordinates as tDisplayDriver.cpp)."""
+    s = variant["sample"]
+    white = (255, 255, 255)
+    muted = (153, 161, 175)
+    ink = (18, 21, 35)
+    pricec = (209, 213, 220)
+
+    def text(dr, txt, xy, size, fill, anchor, bold=False):
+        face = FONT_BOLD if bold else FONT
+        dr.text(xy, txt, font=ImageFont.truetype(face, size), fill=fill, anchor=anchor)
+
+    bars = [
+        (s["hashrate_short"], (82, 134), 16, ink, "mt"),
+        (s["unit"], (122, 140), 9, ink, "mt"),
+        (s["block"], (222, 134), 16, ink, "mt"),
+        ("CURRENT", (272, 135), 7, ink, "mt"),
+        ("BLOCK", (272, 144), 7, ink, "mt"),
+    ]
     specs = {
         "miner": [
-            ("85 680 USD", (261, 16), 9, (209, 213, 220), "rt"),
-            ("CURRENT HASHRATE", (160, 50), 8, (153, 161, 175), "mt"),
-            ("253.72", (152, 64), 30, (255, 255, 255), "mt"),
-            ("18 420 MH", (160, 102), 7, (153, 161, 175), "mt"),
-            ("0", (45, 139), 9, (255, 255, 255), "mt"),
-            ("0.0000", (122, 139), 9, (255, 255, 255), "mt"),
-            ("39\u00b0", (199, 139), 9, (255, 255, 255), "mt"),
-            ("12", (276, 139), 9, (255, 255, 255), "mt"),
-            ("BLOCKS", (45, 151), 7, (153, 161, 175), "mt"),
-            ("DIFF", (122, 151), 7, (153, 161, 175), "mt"),
-            ("TEMP", (199, 151), 7, (153, 161, 175), "mt"),
-            ("SHARES", (276, 151), 7, (153, 161, 175), "mt"),
+            (s["price"], (274, 12), 13, pricec, "rt", True),
+            ("CURRENT HASHRATE", (160, 50), 8, muted, "mt"),
+            (s["hashrate"], (152, 60), 36, white, "mt", True),
+            (s["total"], (160, 102), 7, muted, "mt"),
+            ("0", (45, 139), 9, white, "mt"),
+            (s["diff"], (122, 139), 9, white, "mt"),
+            ("39\u00b0", (199, 139), 9, white, "mt"),
+            ("12", (276, 139), 9, white, "mt"),
+            ("BLOCKS", (45, 151), 7, muted, "mt"),
+            ("DIFF", (122, 151), 7, muted, "mt"),
+            ("TEMP", (199, 151), 7, muted, "mt"),
+            ("SHARES", (276, 151), 7, muted, "mt"),
         ],
         "clock": [
-            ("85 680 USD", (261, 16), 9, (209, 213, 220), "rt"),
-            ("CURRENT TIME", (160, 48), 8, (153, 161, 175), "mt"),
-            ("19:09", (160, 64), 30, (255, 255, 255), "mt"),
-            ("253.7", (82, 134), 16, (18, 21, 35), "mt"),
-            ("KH/s", (122, 140), 9, (18, 21, 35), "mt"),
-            ("970197", (222, 134), 16, (18, 21, 35), "mt"),
-            ("CURRENT", (272, 130), 7, (18, 21, 35), "mt"),
-            ("BLOCK", (272, 140), 7, (18, 21, 35), "mt"),
-        ],
-        "price": [
-            ("85 680", (208, 64), 24, (255, 255, 255), "rt"),
-            ("253.7", (82, 134), 16, (18, 21, 35), "mt"),
-            ("KH/s", (122, 140), 9, (18, 21, 35), "mt"),
-            ("970197", (222, 134), 16, (18, 21, 35), "mt"),
-            ("CURRENT", (272, 130), 7, (18, 21, 35), "mt"),
-            ("BLOCK", (272, 140), 7, (18, 21, 35), "mt"),
-        ],
+            (s["price"], (274, 12), 13, pricec, "rt", True),
+            ("CURRENT TIME", (160, 50), 8, muted, "mt"),
+            ("19:09", (160, 60), 40, white, "mt", True),
+        ] + bars,
+        "price": bars,
         "global": [
-            ("85 680 USD", (261, 16), 9, (209, 213, 220), "rt"),
-            ("132.72", (78, 68), 18, (255, 255, 255), "rt"),
-            ("T", (90, 74), 12, (0, 229, 207), "mt"),
-            ("1", (256, 68), 18, (255, 255, 255), "rt"),
-            ("sat/vB", (276, 76), 9, (0, 229, 207), "mt"),
-            ("970197", (43, 125), 16, (18, 21, 35), "mt"),
-            ("CURRENT", (96, 124), 7, (18, 21, 35), "mt"),
-            ("BLOCK", (96, 134), 7, (18, 21, 35), "mt"),
-            ("79803 BLOCKS LEFT", (56, 147), 7, (255, 255, 255), "mt"),
-            ("HALVING", (160, 134), 8, (255, 255, 255), "mt"),
-            ("964", (230, 128), 16, (18, 21, 35), "rt"),
-            ("EH/s", (248, 134), 8, (18, 21, 35), "mt"),
-            ("GLOBAL", (286, 126), 7, (18, 21, 35), "mt"),
-            ("HASHRATE", (286, 136), 7, (18, 21, 35), "mt"),
+            (s["price"], (274, 12), 13, pricec, "rt", True),
+            (s["net_diff"], (78, 68), 18, white, "rt"),
+            ("T", (90, 74), 12, CYAN, "mt"),
+            (s["fee"], (256, 68), 18, white, "rt"),
+            ("sat/vB", (276, 74), 9, CYAN, "mt"),
+            (s["block"], (43, 125), 16, ink, "mt"),
+            ("CURRENT", (96, 124), 7, ink, "mt"),
+            ("BLOCK", (96, 134), 7, ink, "mt"),
+            (s["left"], (56, 147), 7, white, "mt"),
+            ("HALVING", (160, 134), 8, white, "mt"),
+            (s["global"], (230, 128), 16, ink, "rt"),
+            ("EH/s", (248, 134), 8, ink, "mt"),
+            ("GLOBAL", (286, 126), 7, ink, "mt"),
+            ("HASHRATE", (286, 136), 7, ink, "mt"),
         ],
     }
-    probe = ImageFont.truetype(FONT, 16)
-    for sample in ("253.7", "970197", "132.72", "79803 BLOCKS LEFT", "85 766 USD", "0.00015"):
-        box = probe.getbbox(sample)
-        print("width16", sample, box[2] - box[0] if box else None)
-
     for key, items in specs.items():
         im = frames[key].copy()
         dr = ImageDraw.Draw(im)
-        for s, xy, size, fill, anchor in items:
-            text(dr, s, xy, size, fill, anchor)
-        path = os.path.join(FIG, "preview_" + key + ".png")
+        for item in items:
+            text(dr, *item)
+        if key == "price":
+            face = ImageFont.truetype(FONT_BOLD, 40)
+            num = s["price_big"]
+            dr.text((160, 60), num, font=face, fill=white, anchor="mt")
+            box = face.getbbox(num)
+            usd_x = 160 + (box[2] - box[0]) / 2 + 6
+            dr.text((usd_x, 76), "USD", font=ImageFont.truetype(FONT_BOLD, 20), fill=CYAN, anchor="lt")
+        path = os.path.join(FIG, "preview_" + variant["prefix"] + key + ".png")
         im.resize((640, 340), Image.Resampling.NEAREST).save(path)
         print("wrote", path)
 
 
-def math_check():
-    height = 970197
-    hashrate = 964122384096933800000
-    difficulty = 132716002350731.3
-    fee = 1
-    price = 85766
-    left = ((height // 210000) + 1) * 210000 - height
-    prog = (210000 - left) * 100 // 210000
-    eh = hashrate / 1e18
-    tera = difficulty / 1e12
-    print("price", price)
-    print("height", height)
-    print("EH {:.0f}".format(eh))
-    print("T {:.2f}".format(tera))
-    print("fee", fee)
-    print("blocks_left", left, "progress", prog)
+def run(name):
+    variant = VARIANTS[name]
+    print("== Guardian", name.upper())
+    frames = build(variant)
+    if name == "mini":
+        write_headers_mini(frames)
+    else:
+        write_headers_max(frames)
+    paint_preview(variant, frames)
 
 
 if __name__ == "__main__":
-    math_check()
-    frames = build()
-    write_headers(frames)
-    paint_preview(frames)
+    args = [a.lstrip("-") for a in sys.argv[1:]]
+    if not args or "all" in args:
+        args = ["mini", "max"]
+    for arg in args:
+        if arg not in VARIANTS:
+            sys.exit("unknown variant '{}' (use mini, max or all)".format(arg))
+        run(arg)

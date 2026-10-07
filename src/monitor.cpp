@@ -10,6 +10,10 @@
 #include "monitor.h"
 #include "drivers/storage/storage.h"
 #include "drivers/devices/device.h"
+#ifdef NERD_NOS
+#include "mining_guardian_max.h"
+#include "drivers/guardian-max/adc.h"
+#endif
 
 extern uint32_t templates;
 extern uint32_t hashes;
@@ -496,6 +500,9 @@ static String formatAvgHashrate(double avg_hashrate)
 
 String getCurrentHashRate(unsigned long mElapsed)
 {
+#ifdef NERD_NOS
+  return String(nerdnos_get_avg_hashrate(), 1);
+#else
   if (s_freezeHashrate)
   {
     double avg = 0.0;
@@ -545,6 +552,7 @@ String getCurrentHashRate(unsigned long mElapsed)
   }
 
   return formatAvgHashrate(avg_hashrate);
+#endif
 }
 
 mining_data getMiningData(unsigned long mElapsed)
@@ -565,14 +573,23 @@ mining_data getMiningData(unsigned long mElapsed)
   sprintf(timeMining, "%01d  %02d:%02d:%02d", days, hours, mins, secs);
 
   data.completedShares = shares;
+#ifdef NERD_NOS
+  // ASIC work estimated from accepted shares (diff * 2^32); the ESP does not hash.
+  data.totalMHashes = String(nerdnos_get_total_mhashes(), 0);
+#else
   data.totalMHashes = Mhashes;
+#endif
   data.totalKHashes = totalKHashes;
   data.currentHashRate = getCurrentHashRate(mElapsed);
   data.templates = templates;
   data.bestDiff = best_diff_string;
   data.timeMining = timeMining;
   data.valids = valids;
+#ifdef NERD_NOS
+  data.temp = String(nerdnos_get_temperature(), 0);
+#else
   data.temp = String(temperatureRead(), 0);
+#endif
   data.currentTime = getTime();
   char poolBuf[16];
   snprintf(poolBuf, sizeof(poolBuf), "%.4g", currentPoolDifficulty);

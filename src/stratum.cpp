@@ -55,7 +55,9 @@ bool tx_mining_subscribe(WiFiClient& client, mining_subscribe& mSubscribe)
     
     // Subscribe
     id = 1; //Initialize id messages
-    #ifndef HAN
+    #if defined(NERD_NOS)
+    sprintf(payload, "{\"id\": %u, \"method\": \"mining.subscribe\", \"params\": [\"GuardianMAX/%s\"]}\n", id, CURRENT_VERSION);
+    #elif !defined(HAN)
     sprintf(payload, "{\"id\": %u, \"method\": \"mining.subscribe\", \"params\": [\"NerdMinerV2/%s\"]}\n", id, CURRENT_VERSION);
     #else
     sprintf(payload, "{\"id\": %u, \"method\": \"mining.subscribe\", \"params\": [\"HAN_SOLOminer/%s\"]}\n", id, CURRENT_VERSION);
@@ -226,6 +228,27 @@ bool tx_mining_submit(WiFiClient& client, mining_subscribe mWorker, mining_job m
 
     return true;
 }
+
+#ifdef NERD_NOS
+bool tx_mining_submit_asic(WiFiClient& client, mining_subscribe mWorker, const bm_job_t* asic_job, task_result *result)
+{
+    char payload[BUFFER] = {0};
+
+    id = getNextId(id);
+    sprintf(payload, "{\"id\": %u, \"method\": \"mining.submit\", \"params\": [\"%s\",\"%s\",\"%s\",\"%08lx\",\"%08lx\",\"%08lx\"]}\n",
+        id,
+        mWorker.wName,
+        asic_job->jobid,
+        asic_job->extranonce2,
+        (unsigned long)asic_job->ntime,
+        (unsigned long)result->nonce,
+        (unsigned long)(result->rolled_version ^ asic_job->version)
+    );
+    Serial.print("  Sending  : "); Serial.print(payload);
+    client.print(payload);
+    return true;
+}
+#endif
 
 bool parse_mining_set_difficulty(String line, double& difficulty)
 {

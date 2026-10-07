@@ -15,13 +15,17 @@
 #include "drivers/storage/SDCard.h"
 #include "ShaTests/nerdSHA_HWTest.h"
 #include "timeconst.h"
+#ifdef NERD_NOS
+#include "mining_guardian_max.h"
+#include "drivers/guardian-max/nerdnos.h"
+#endif
 
 #ifdef TOUCH_ENABLE
 #include "TouchHandler.h"
 #endif
 
 #include <soc/soc_caps.h>
-#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(NERDMINERV2)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && (defined(NERDMINERV2) || defined(NERD_NOS))
 #include <esp32-hal-cpu.h>
 #endif
 //#define HW_SHA256_TEST
@@ -77,7 +81,7 @@ void setup()
   Serial.setTimeout(0);
   delay(SECOND_MS/10);
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(NERDMINERV2)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && (defined(NERDMINERV2) || defined(NERD_NOS))
   setCpuFrequencyMhz(240);
   Serial.printf("CPU: %u MHz\n", getCpuFrequencyMhz());
 #endif
@@ -159,6 +163,14 @@ void setup()
  #endif
 
   /******** CREATE MINER TASKS *****/
+#ifdef NERD_NOS
+  nerdnos_init();
+  asicJobsInit();
+  TaskHandle_t asicTx = NULL;
+  TaskHandle_t asicRx = NULL;
+  xTaskCreatePinnedToCore(runASIC, "Asic0-TX", 6000, (void *)0, 1, &asicTx, 0);
+  xTaskCreatePinnedToCore(runASIC_RX, "Asic0-RX", 6000, (void *)0, 1, &asicRx, 1);
+#else
   //for (size_t i = 0; i < THREADS; i++) {
   //  char *name = (char*) malloc(32);
   //  sprintf(name, "(%d)", i);
@@ -189,6 +201,7 @@ void setup()
   xTaskCreate(minerWorkerSw, "MinerSw-1", 6000, (void*)1, 1, &minerTask2);
   #endif
   esp_task_wdt_add(minerTask2);
+#endif
 #endif
 
 #ifdef GUARDIAN

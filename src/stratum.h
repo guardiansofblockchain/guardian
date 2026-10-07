@@ -61,6 +61,10 @@ bool parse_mining_notify(String line, mining_job& mJob);
 
 //Method Mining.submit
 bool tx_mining_submit(WiFiClient& client, mining_subscribe mWorker, mining_job mJob, unsigned long nonce, unsigned long &submit_id);
+#ifdef NERD_NOS
+#include "drivers/guardian-max/nerdnos.h"
+bool tx_mining_submit_asic(WiFiClient& client, mining_subscribe mWorker, const bm_job_t* asic_job, task_result *result);
+#endif
 
 //Difficulty Methods 
 bool tx_suggest_difficulty(WiFiClient& client, double difficulty);

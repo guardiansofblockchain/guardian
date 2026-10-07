@@ -14,6 +14,9 @@
 #include "media/images_guardian_320_170.h"
 #include "media/guardian_miner_bg.h"
 #include "media/guardian_cycle_bg.h"
+#ifdef NERD_NOS
+#include "media/guardian_max_bg.h"
+#endif
 #if __has_include("media/DMSans_subset.h")
 #include "media/DMSans_subset.h"
 #define GUARDIAN_USE_DM_SANS
@@ -24,6 +27,10 @@
 #define HEIGHT 170
 
 OpenFontRender render;
+#ifdef GUARDIAN_USE_DM_SANS
+OpenFontRender renderBold;
+static bool guardianBoldReady = false;
+#endif
 TFT_eSPI tft = TFT_eSPI();                  // Invoke library, pins defined in User_Setup.h
 TFT_eSprite background = TFT_eSprite(&tft); // Invoke library sprite
 
@@ -58,7 +65,29 @@ void tDisplay_Init(void)
     Serial.println("Initialise error");
     return;
   }
+#ifdef GUARDIAN_USE_DM_SANS
+  renderBold.setDrawer(background);
+  renderBold.setLineSpaceRatio(0.9);
+  renderBold.setBackgroundFillMethod(BgFillMethod::None);
+  guardianBoldReady = renderBold.loadFont(DMSans_Bold_subset, DMSans_Bold_subset_SIZE) == 0;
+  if (!guardianBoldReady)
+    Serial.println("Bold font failed, falling back to regular");
+#endif
 }
+
+#ifdef GUARDIAN
+#ifdef GUARDIAN_USE_DM_SANS
+static OpenFontRender &guardianFont(bool bold)
+{
+  return (bold && guardianBoldReady) ? renderBold : render;
+}
+#else
+static OpenFontRender &guardianFont(bool)
+{
+  return render;
+}
+#endif
+#endif
 
 void tDisplay_AlternateScreenState(void)
 {
@@ -115,14 +144,38 @@ static const uint16_t gPill = 0x05D4;   // #02b9a7
 static void guardianPillPrice(const char *price)
 {
   String grouped = guardianGrouped(price ? price : "");
-  render.setFontSize(9);
+  OpenFontRender &pen = guardianFont(true);
+  // Pill interior is y 11..28, text ends before the status dot at x=281.
   if (!grouped.length() || grouped == "0")
   {
-    render.rdrawString("--", 261, 16, gPrice, gCard);
+    pen.setFontSize(13);
+    pen.rdrawString("--", 274, 12, gPrice, gCard);
     return;
   }
   String line = grouped + " USD";
-  render.rdrawString(line.c_str(), 261, 16, gPrice, gCard);
+  // 13pt bold fits "999 999 USD"; longer prices drop a step so they stay clear of the icon
+  pen.setFontSize(grouped.length() > 7 ? 11 : 13);
+  pen.rdrawString(line.c_str(), 274, 12, gPrice, gCard);
+}
+
+// Total hashes since the stats were last reset, given in megahashes.
+// Picks a unit so the number stays short: 18 420 MH, 21.9 GH, 720.5 TH, 1.2 PH.
+static String guardianTotalHashes(const String &megaHashes)
+{
+  double mh = atof(guardianNumber(megaHashes).c_str());
+  if (mh < 0)
+    mh = 0;
+  if (mh < 100000.0)
+    return guardianGrouped(String((unsigned long)(mh + 0.5))) + " MH";
+  const char *units[] = {"GH", "TH", "PH", "EH"};
+  double value = mh / 1000.0;
+  int unit = 0;
+  while (value >= 1000.0 && unit < 3)
+  {
+    value /= 1000.0;
+    unit++;
+  }
+  return String(value, value < 100.0 ? 1 : 0) + " " + units[unit];
 }
 
 static const char *guardianOrDash(const char *value)
@@ -135,13 +188,17 @@ static void guardianBottomBars(const char *hashRate, const char *blockHeight)
   render.setFontSize(16);
   render.cdrawString(guardianOrDash(hashRate), 82, 134, gInk, gYellow);
   render.setFontSize(9);
+#ifdef NERD_NOS
+  render.cdrawString("GH/s", 122, 140, gInk, gYellow);
+#else
   render.cdrawString("KH/s", 122, 140, gInk, gYellow);
+#endif
 
   render.setFontSize(16);
   render.cdrawString(guardianOrDash(blockHeight), 222, 134, gInk, gCyan);
   render.setFontSize(7);
-  render.cdrawString("CURRENT", 272, 130, gInk, gCyan);
-  render.cdrawString("BLOCK", 272, 140, gInk, gCyan);
+  render.cdrawString("CURRENT", 272, 135, gInk, gCyan);
+  render.cdrawString("BLOCK", 272, 144, gInk, gCyan);
 }
 #endif
 
@@ -151,7 +208,11 @@ void tDisplay_MinerScreen(unsigned long mElapsed)
 
 #ifdef GUARDIAN
   background.fillSprite(0x1082);
+#ifdef NERD_NOS
+  background.pushImage(0, 0, guardianMaxMinerWidth, guardianMaxMinerHeight, guardianMaxMinerScreen);
+#else
   background.pushImage(0, 0, guardianMinerWidth, guardianMinerHeight, guardianMinerScreen);
+#endif
 
   String price = getBTCprice();
   guardianPillPrice(price.c_str());
@@ -159,15 +220,13 @@ void tDisplay_MinerScreen(unsigned long mElapsed)
   render.setFontSize(8);
   render.cdrawString("CURRENT HASHRATE", 160, 50, gMuted, gBg);
 
-  render.setFontSize(30);
-  render.cdrawString(data.currentHashRate.c_str(), 152, 64, gWhite, gBg);
+  OpenFontRender &rate = guardianFont(true);
+  rate.setFontSize(36);
+  rate.cdrawString(data.currentHashRate.c_str(), 152, 60, gWhite, gBg);
 
-  String totalMh = guardianGrouped(data.totalMHashes.c_str());
-  if (!totalMh.length())
-    totalMh = "0";
-  totalMh += " MH";
   render.setFontSize(7);
-  render.cdrawString(totalMh.c_str(), 160, 102, gMuted, gBg);
+  String total = guardianTotalHashes(data.totalMHashes);
+  render.cdrawString(total.c_str(), 160, 102, gMuted, gBg);
 
   render.setFontSize(9);
   render.cdrawString(data.valids.c_str(), 45, 139, gWhite, gCard);
@@ -235,13 +294,18 @@ void tDisplay_ClockScreen(unsigned long mElapsed)
 
 #ifdef GUARDIAN
   background.fillSprite(0x1082);
+#ifdef NERD_NOS
+  background.pushImage(0, 0, guardianMaxClockWidth, guardianMaxClockHeight, guardianMaxClockScreen);
+#else
   background.pushImage(0, 0, guardianClockWidth, guardianClockHeight, guardianClockScreen);
+#endif
   guardianPillPrice(data.btcPrice.c_str());
 
   render.setFontSize(8);
   render.cdrawString("CURRENT TIME", 160, 50, gMuted, gBg);
-  render.setFontSize(30);
-  render.cdrawString(data.currentTime.c_str(), 160, 64, gWhite, gBg);
+  OpenFontRender &clockPen = guardianFont(true);
+  clockPen.setFontSize(40);
+  clockPen.cdrawString(data.currentTime.c_str(), 160, 60, gWhite, gBg);
   guardianBottomBars(data.currentHashRate.c_str(), data.blockHeight.c_str());
 #else
   // Print background screen
@@ -285,7 +349,11 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
 
 #ifdef GUARDIAN
   background.fillSprite(0x1082);
+#ifdef NERD_NOS
+  background.pushImage(0, 0, guardianMaxGlobalWidth, guardianMaxGlobalHeight, guardianMaxGlobalScreen);
+#else
   background.pushImage(0, 0, guardianGlobalWidth, guardianGlobalHeight, guardianGlobalScreen);
+#endif
   guardianPillPrice(data.btcPrice.c_str());
 
   String difficulty = guardianNumber(data.netwrokDifficulty);
@@ -399,13 +467,28 @@ void tDisplay_BTCprice(unsigned long mElapsed)
 
 #ifdef GUARDIAN
   background.fillSprite(0x1082);
+#ifdef NERD_NOS
+  background.pushImage(0, 0, guardianMaxPriceWidth, guardianMaxPriceHeight, guardianMaxPriceScreen);
+#else
   background.pushImage(0, 0, guardianPriceWidth, guardianPriceHeight, guardianPriceScreen);
+#endif
   String price = guardianGrouped(data.btcPrice);
-  render.setFontSize(24);
+  OpenFontRender &pen = guardianFont(true);
+  const int priceCenter = 160;
+  const int priceY = 60;
+  pen.setFontSize(40);
   if (!price.length())
-    render.cdrawString("--", 160, 64, gWhite, gBg);
+    pen.cdrawString("--", priceCenter, priceY, gWhite, gBg);
   else
-    render.rdrawString(price.c_str(), 208, 64, gWhite, gBg);
+  {
+    uint32_t numW = pen.getTextWidth("%s", price.c_str());
+    uint32_t numH = pen.getTextHeight("%s", price.c_str());
+    pen.cdrawString(price.c_str(), priceCenter, priceY, gWhite, gBg);
+    pen.setFontSize(20);
+    uint32_t usdH = pen.getTextHeight("USD");
+    int usdY = priceY + (int)numH - (int)usdH;
+    pen.drawString("USD", priceCenter + (int)numW / 2 + 6, usdY, gCyan, gBg);
+  }
   guardianBottomBars(data.currentHashRate.c_str(), data.blockHeight.c_str());
 #else
   data.currentDate ="01/12/2023";
