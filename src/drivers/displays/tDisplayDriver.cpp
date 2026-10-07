@@ -16,6 +16,7 @@
 #include "media/guardian_cycle_bg.h"
 #ifdef NERD_NOS
 #include "media/guardian_max_bg.h"
+#include "media/guardian_max_splash.h"
 #endif
 #if __has_include("media/DMSans_subset.h")
 #include "media/DMSans_subset.h"
@@ -360,20 +361,26 @@ void tDisplay_GlobalHashScreen(unsigned long mElapsed)
   String fee = guardianNumber(data.halfHourFee);
   String left = guardianNumber(data.remainingBlocks);
 
+#ifdef NERD_NOS
+  // MAX frame spreads this row: difficulty further left, fee further right
+  const int diffX = 64, unitX = 73, feeX = 271, satX = 292;
+#else
+  const int diffX = 78, unitX = 90, feeX = 256, satX = 276;
+#endif
   if (difficulty.length())
   {
     render.setFontSize(18);
-    render.rdrawString(difficulty.c_str(), 78, 68, gWhite, gBg);
+    render.rdrawString(difficulty.c_str(), diffX, 68, gWhite, gBg);
     render.setFontSize(12);
-    render.cdrawString("T", 90, 74, gCyan, gBg);
+    render.cdrawString("T", unitX, 74, gCyan, gBg);
   }
 
   if (fee.length())
   {
     render.setFontSize(18);
-    render.rdrawString(fee.c_str(), 256, 68, gWhite, gBg);
+    render.rdrawString(fee.c_str(), feeX, 68, gWhite, gBg);
     render.setFontSize(9);
-    render.cdrawString("sat/vB", 276, 74, gCyan, gBg);
+    render.cdrawString("sat/vB", satX, 74, gCyan, gBg);
   }
 
   render.setFontSize(16);
@@ -535,7 +542,11 @@ void tDisplay_LoadingScreen(void)
 {
 #ifdef GUARDIAN
   tft.fillScreen(TFT_BLACK);
+#ifdef NERD_NOS
+  tft.pushImage(0, 0, guardianInitWidth, guardianInitHeight, guardianMaxInitScreen);
+#else
   tft.pushImage(0, 0, guardianInitWidth, guardianInitHeight, guardianInitScreen);
+#endif
 #else
   tft.fillScreen(TFT_BLACK);
   tft.pushImage(0, 0, initWidth, initHeight, initScreen);
@@ -547,7 +558,11 @@ void tDisplay_LoadingScreen(void)
 void tDisplay_SetupScreen(void)
 {
 #ifdef GUARDIAN
+#ifdef NERD_NOS
+  tft.pushImage(0, 0, guardianSetupWidth, guardianSetupHeight, guardianMaxSetupScreen);
+#else
   tft.pushImage(0, 0, guardianSetupWidth, guardianSetupHeight, guardianSetupScreen);
+#endif
 #else
   tft.pushImage(0, 0, setupModeWidth, setupModeHeight, setupModeScreen);
 #endif

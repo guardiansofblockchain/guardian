@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Rebuild Guardian 320x170 backgrounds from the full Figma 632x332 exports.
 
-One shared pipeline for both products. Guardian MINI and Guardian MAX use the
-same layout; the only differences are the logo badge and the hashrate unit next
-to the big miner number (KH/s vs GH/s), which stays in the bitmap.
+One shared pipeline for both products. Guardian MAX uses its own Figma frames
+(logo, GH/s, and a slightly wider global-stats row). Live numbers are erased
+and redrawn by the firmware.
 
 Erases only the glyphs the firmware redraws. Chrome (pill, wifi, icons,
 units, GLOBAL STATS, bar shapes, HALVING pill, BLOCKS LEFT pill) stays.
 
 Inputs (tools/figma):
   MINI: miner_632.png clock_632.png price_632.png global_632.png logo_guardian_mini.png
-  MAX:  max_miner_632.png (GH/s unit) + the MINI clock/price/global frames,
+  MAX:  max_miner_632.png max_clock_632.png max_price_632.png max_global_632.png
         logo_guardian_max.png (rasterized from logo_guardian_max.svg, Figma 755:127)
 
 Outputs:
@@ -47,6 +47,14 @@ VARIANTS = {
         "logo": "logo_guardian_mini.png",
         # right edge of the big hashrate cover box; "KH/s" starts at x=423
         "hashrate_right": 416,
+        # Figma boxes for the live global-stats glyphs, then device draw points
+        "global_cover": {
+            "diff": (36, 128, 156, 172),
+            "t": (150, 140, 184, 172),
+            "fee": (470, 128, 516, 172),
+            "sat": (508, 138, 602, 174),
+        },
+        "global_draw": {"diff": (78, 68), "t": (90, 74), "fee": (256, 68), "sat": (276, 74)},
         "sample": {
             "price": "85 680 USD",
             "price_big": "85 680",
@@ -65,14 +73,22 @@ VARIANTS = {
     "max": {
         "prefix": "max_",
         "logo": "logo_guardian_max.png",
-        # Only the miner frame comes from the MAX Figma section (it carries the
-        # GH/s unit in the bitmap). Clock, price and global reuse the MINI frames:
-        # the chrome is identical by design, the logo is stamped anyway, and the
-        # MAX global frame in Figma has its title and values shifted ~20px, which
-        # would not line up with the shared firmware coordinates.
-        "sources": {"miner": "max_miner_632.png"},
+        "sources": {
+            "miner": "max_miner_632.png",
+            "clock": "max_clock_632.png",
+            "price": "max_price_632.png",
+            "global": "max_global_632.png",
+        },
         # "GH/s" starts at x=432 on the MAX frame
         "hashrate_right": 428,
+        # MAX spreads the global row: difficulty sits further left, fee further right
+        "global_cover": {
+            "diff": (12, 128, 134, 172),
+            "t": (130, 140, 158, 176),
+            "fee": (500, 128, 545, 172),
+            "sat": (530, 136, 625, 176),
+        },
+        "global_draw": {"diff": (64, 68), "t": (73, 74), "fee": (271, 68), "sat": (292, 74)},
         "sample": {
             "price": "128 397 USD",
             "price_big": "128 397",
@@ -204,10 +220,11 @@ def build(variant):
     glob = prepare(variant, "global")
     stamp_logo(glob, logo)
     cover_text(glob, pill)
-    cover_text(glob, (36, 128, 156, 172))                            # difficulty
-    cover_text(glob, (150, 140, 184, 172))                           # "T"
-    cover_text(glob, (470, 128, 516, 172))                           # fee
-    cover_text(glob, (508, 138, 602, 174))                           # "sat/vB"
+    cover = variant["global_cover"]
+    cover_text(glob, cover["diff"])                                  # difficulty
+    cover_text(glob, cover["t"])                                     # "T"
+    cover_text(glob, cover["fee"])                                   # fee
+    cover_text(glob, cover["sat"])                                   # "sat/vB"
     flatten_ink(glob, (30, 242, 230, 276), CYAN)                     # block bar (pill below stays)
     cover_text(glob, (40, 284, 176, 300), delta=18)                  # BLOCKS LEFT text, keeps pill
     cover_text(glob, (268, 260, 368, 286))                           # HALVING text, keeps dark pill
@@ -270,6 +287,7 @@ def write_headers_max(frames):
 def paint_preview(variant, frames):
     """Approximate the firmware draw calls (same coordinates as tDisplayDriver.cpp)."""
     s = variant["sample"]
+    g = variant["global_draw"]
     white = (255, 255, 255)
     muted = (153, 161, 175)
     ink = (18, 21, 35)
@@ -309,10 +327,10 @@ def paint_preview(variant, frames):
         "price": bars,
         "global": [
             (s["price"], (274, 12), 13, pricec, "rt", True),
-            (s["net_diff"], (78, 68), 18, white, "rt"),
-            ("T", (90, 74), 12, CYAN, "mt"),
-            (s["fee"], (256, 68), 18, white, "rt"),
-            ("sat/vB", (276, 74), 9, CYAN, "mt"),
+            (s["net_diff"], g["diff"], 18, white, "rt"),
+            ("T", g["t"], 12, CYAN, "mt"),
+            (s["fee"], g["fee"], 18, white, "rt"),
+            ("sat/vB", g["sat"], 9, CYAN, "mt"),
             (s["block"], (43, 125), 16, ink, "mt"),
             ("CURRENT", (96, 124), 7, ink, "mt"),
             ("BLOCK", (96, 134), 7, ink, "mt"),
